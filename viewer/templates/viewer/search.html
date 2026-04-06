@@ -1,0 +1,82 @@
+{% extends "viewer/base.html" %}
+{% block title %}Patient Search — Biplane Viewer{% endblock %}
+
+{% block content %}
+<div class="search-page">
+  <h1>Patient Search</h1>
+  <div class="search-box">
+    <input id="search-input" type="text" placeholder="Patient name…" autocomplete="off">
+    <button id="search-btn">Search</button>
+  </div>
+  <div id="search-results" class="results-list"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const searchBtn   = document.getElementById("search-btn");
+const searchInput = document.getElementById("search-input");
+const resultsList = document.getElementById("search-results");
+
+searchBtn.addEventListener("click", doSearch);
+searchInput.addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+
+async function doSearch() {
+  const name = searchInput.value.trim();
+  if (!name) return;
+  resultsList.innerHTML = '<p class="loading-msg">Searching…</p>';
+
+  const resp = await fetch("/api/search/", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken")},
+    body: JSON.stringify({patient_name: name}),
+  });
+  const data = await resp.json();
+
+  if (data.error) {
+    resultsList.innerHTML = `<p class="error-msg">${data.error}</p>`;
+    return;
+  }
+  if (!data.studies.length) {
+    resultsList.innerHTML = '<p class="muted">No studies found.</p>';
+    return;
+  }
+
+  resultsList.innerHTML = data.studies.map(s => `
+    <div class="study-card">
+      <div class="study-info">
+        <strong>${s.patient_name}</strong>
+        <span class="muted">ID: ${s.patient_id}</span>
+        <span class="muted">Date: ${formatDate(s.study_date)}</span>
+        <span class="muted">${s.description}</span>
+      </div>
+      <button class="load-btn" onclick="loadStudy('${s.id}')">Open 3D Viewer</button>
+    </div>
+  `).join("");
+}
+
+async function loadStudy(studyId) {
+  const resp = await fetch(`/api/load/${studyId}/`, {
+    method: "POST",
+    headers: {"X-CSRFToken": getCookie("csrftoken")},
+  });
+  const data = await resp.json();
+
+  if (data.status === "ready") {
+    window.location.href = `/viewer/${studyId}/`;
+  } else {
+    window.location.href = `/viewer/${studyId}/?job_id=${data.job_id}`;
+  }
+}
+
+function formatDate(d) {
+  if (!d || d.length !== 8) return d || "—";
+  return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
+}
+
+function getCookie(name) {
+  const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+  return m ? m[2] : "";
+}
+</script>
+{% endblock %}

@@ -1,0 +1,195 @@
+/* Dark theme matching the desktop app */
+:root {
+  --bg:       #0d0d0d;
+  --panel-bg: #1a1a1a;
+  --border:   #2a2a2a;
+  --accent:   #00b4d8;
+  --text:     #e0e0e0;
+  --muted:    #888;
+  --btn-bg:   #2c2c2c;
+  --btn-hover:#3a3a3a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Header ────────────────────────────────────────────────────── */
+.app-header {
+  background: #111;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-shrink: 0;
+}
+.app-logo { color: var(--accent); font-weight: 600; font-size: 14px; letter-spacing: 0.5px; }
+.app-header nav a { color: var(--muted); text-decoration: none; font-size: 12px; }
+.app-header nav a:hover { color: var(--text); }
+
+/* ── Main area ─────────────────────────────────────────────────── */
+main { flex: 1; overflow: hidden; }
+
+/* ── Search page ───────────────────────────────────────────────── */
+.search-page { padding: 40px; max-width: 800px; }
+.search-page h1 { font-size: 20px; margin-bottom: 20px; color: var(--accent); }
+
+.search-box { display: flex; gap: 8px; margin-bottom: 24px; }
+.search-box input {
+  flex: 1;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+}
+.search-box input:focus { border-color: var(--accent); }
+
+button {
+  background: var(--btn-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+button:hover { background: var(--btn-hover); }
+
+.results-list { display: flex; flex-direction: column; gap: 8px; }
+
+.study-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.study-info { display: flex; flex-direction: column; gap: 2px; }
+.study-info strong { font-size: 14px; }
+.muted { color: var(--muted); font-size: 11px; }
+
+.load-btn {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  font-weight: 600;
+  padding: 8px 14px;
+  white-space: nowrap;
+}
+.load-btn:hover { background: #00d4f8; }
+
+.loading-msg { color: var(--muted); font-style: italic; }
+.error-msg   { color: #e74c3c; }
+
+/* ── Viewer layout ─────────────────────────────────────────────── */
+.viewer-layout {
+  display: flex;
+  height: 100%;
+}
+
+.viewer-panel {
+  width: 230px;
+  flex-shrink: 0;
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+  padding: 12px 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.panel-section { display: flex; flex-direction: column; gap: 6px; }
+
+.panel-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.radio-group { display: flex; gap: 12px; }
+.radio-group label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+.btn-group { display: flex; flex-wrap: wrap; gap: 4px; }
+.cam-btn { padding: 5px 10px; font-size: 11px; }
+
+input[type=range] {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ── Canvas area ───────────────────────────────────────────────── */
+.viewer-canvas-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+#three-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Loading overlay ───────────────────────────────────────────── */
+.loading-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(13,13,13,0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.loading-box {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: 260px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.progress-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}

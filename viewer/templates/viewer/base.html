@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Biplane Viewer{% endblock %}</title>
+  {% load static %}
+  <link rel="stylesheet" href="{% static 'css/viewer.css' %}">
+</head>
+<body>
+  <header class="app-header">
+    <span class="app-logo">&#9632; Biplane Stack Viewer</span>
+    <nav>
+      <a href="{% url 'search' %}">Search</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
