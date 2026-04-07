@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { TrackballControls } from "three/addons/controls/TrackballControls.js";
 
 // ── Config from Django template ──────────────────────────────────────────────
-const { studyId, cacheId, nFrames, cursorFrac } = window.VIEWER_CONFIG;
+const { studyId, cacheId, nFrames, cursorFrac, jobId } = window.VIEWER_CONFIG;
 
 // ── Constants (match desktop constants.py exactly) ───────────────────────────
 const PROC_W     = 300;
@@ -734,15 +734,15 @@ function onLoadComplete() {
   updateFrameUI();
 }
 
-const params = new URLSearchParams(window.location.search);
-const jobId  = params.get("job_id");
+// jobId is injected by the Django template (set when auto-reloading an expired shared link)
+const activeJobId = jobId || new URLSearchParams(window.location.search).get("job_id");
 
-if (nFrames > 0 && !jobId) {
+if (nFrames > 0 && !activeJobId) {
   onLoadComplete();
-} else if (jobId) {
+} else if (activeJobId) {
   // Connect WebSocket for live progress
   const wsProto = location.protocol === "https:" ? "wss" : "ws";
-  const wsUrl = `${wsProto}://${location.host}/ws/progress/${jobId}/`;
+  const wsUrl = `${wsProto}://${location.host}/ws/progress/${activeJobId}/`;
   console.log("[ws] connecting to", wsUrl);
   const ws = new WebSocket(wsUrl);
 
@@ -812,6 +812,16 @@ if (nFrames > 0 && !jobId) {
 function getCsrfToken() {
   return document.querySelector("meta[name=csrf-token]")?.content || "";
 }
+
+// ── Share button ─────────────────────────────────────────────────────────────
+document.getElementById("share-btn").addEventListener("click", () => {
+  const url = `${location.origin}/viewer/${studyId}/?cache_id=${encodeURIComponent(cacheId)}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const confirm = document.getElementById("share-confirm");
+    confirm.style.display = "block";
+    setTimeout(() => { confirm.style.display = "none"; }, 2500);
+  });
+});
 
 // ── Initial state ────────────────────────────────────────────────────────────
 sagZSlider.value = sagZOffset;

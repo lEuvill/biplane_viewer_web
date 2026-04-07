@@ -12,6 +12,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from .orthanc import orthanc_find_studies, orthanc_fetch_frame_bgr
 from .cache   import get_frame, get_status, get_meta, set_status
 from .tasks   import load_study_task
+from .models  import SharedStudy
 
 import cv2
 import numpy as np
@@ -26,12 +27,25 @@ def search_page(request):
 
 def viewer_page(request, study_id):
     cache_id = request.GET.get("cache_id", study_id)
-    meta = get_meta(cache_id)
+    meta     = get_meta(cache_id)
+    job_id   = request.GET.get("job_id", "")
+
+    # Cache expired but we have a stored share record — auto-trigger re-download
+    if not meta and not job_id:
+        try:
+            shared = SharedStudy.objects.get(cache_id=cache_id)
+            task   = load_study_task.delay(study_id, shared.instance_ids, cache_id)
+            set_status(cache_id, "loading", task.id)
+            job_id = task.id
+        except SharedStudy.DoesNotExist:
+            pass   # unknown cache_id — viewer.js will redirect to search
+
     return render(request, "viewer/viewer.html", {
         "study_id":    study_id,
         "cache_id":    cache_id,
         "n_frames":    meta["n_frames"]    if meta else 0,
         "cursor_frac": meta["cursor_frac"] if meta else 0.5,
+        "job_id":      job_id,
     })
 
 
@@ -88,6 +102,12 @@ def api_load_study(request, study_id):
                 return JsonResponse({"status": "loading", "job_id": status["job_id"],
                                      "cache_id": cache_id})
             # Task is no longer running (failed/revoked) — redispatch
+
+        # Persist instance selection so shared links can auto-reload after cache expiry
+        SharedStudy.objects.update_or_create(
+            cache_id=cache_id,
+            defaults={"study_id": study_id, "instance_ids": instance_ids},
+        )
 
         task = load_study_task.delay(study_id, instance_ids, cache_id)
         set_status(cache_id, "loading", task.id)

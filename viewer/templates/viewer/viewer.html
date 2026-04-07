@@ -82,6 +82,15 @@
       <div class="slots-grid" id="cam-slots"></div>
     </div>
 
+    <!-- Share link -->
+    <div class="panel-section">
+      <div class="section-title">SHARE</div>
+      <button id="share-btn" style="width:100%">Copy viewer link</button>
+      <div id="share-confirm" style="display:none;margin-top:4px;font-size:11px;color:#33cc66;text-align:center">
+        Link copied to clipboard ✓
+      </div>
+    </div>
+
     <!-- Export video -->
     <div class="panel-section">
       <div class="section-title">EXPORT VIDEO</div>
@@ -161,6 +170,7 @@
     cacheId:    "{{ cache_id }}",
     nFrames:    {{ n_frames }},
     cursorFrac: {{ cursor_frac }},
+    jobId:      "{{ job_id }}",
   };
 </script>
 {% load static %}
