@@ -2,71 +2,410 @@
 {% block title %}Patient Search — Biplane Viewer{% endblock %}
 
 {% block content %}
-<div class="search-page">
-  <h1>Patient Search</h1>
-  <div class="search-box">
-    <input id="search-input" type="text" placeholder="Patient name…" autocomplete="off">
-    <button id="search-btn">Search</button>
-  </div>
-  <div id="search-results" class="results-list"></div>
+<div class="pacs-page">
+
+  <!-- ── Left column ─────────────────────────────── -->
+  <div class="pacs-left">
+
+    <div class="page-heading">
+      <h1>PACS / Orthanc</h1>
+      <p>Search patients on the Orthanc server and load recordings.</p>
+    </div>
+
+    <!-- Search input -->
+    <div class="pacs-section">
+      <div class="section-label">PATIENT SEARCH</div>
+      <div class="search-row">
+        <input id="search-input" type="text"
+               placeholder="Patient name  (e.g.  smith  or  smith john)"
+               autocomplete="off">
+        <button id="search-btn">Search</button>
+      </div>
+      <div id="search-status" class="status-label">Enter a patient name and press Search.</div>
+    </div>
+
+    <!-- Studies list -->
+    <div class="pacs-section" style="flex:1;min-height:0">
+      <div class="section-label">STUDIES</div>
+      <div id="studies-list" class="result-list">
+        <div class="list-placeholder">No results yet.</div>
+      </div>
+    </div>
+
+    <!-- Recordings list -->
+    <div class="pacs-section" style="flex:0.6;min-height:0">
+      <div class="section-label" style="display:flex;justify-content:space-between;align-items:center">
+        RECORDINGS
+        <button id="select-all-btn" style="display:none;font-size:11px;padding:2px 8px">Select All</button>
+      </div>
+      <div id="recordings-list" class="result-list">
+        <div class="list-placeholder">Select a study above.</div>
+      </div>
+    </div>
+
+  </div><!-- /pacs-left -->
+
+  <!-- ── Right column ────────────────────────────── -->
+  <div class="pacs-right">
+
+    <div class="pacs-section">
+      <div class="section-label">PREVIEW</div>
+      <div class="preview-row">
+        <div class="thumb-col">
+          <div id="prev-trans" class="thumb-box">—</div>
+          <div class="thumb-cap">Transverse</div>
+        </div>
+        <div class="thumb-col">
+          <div id="prev-sag" class="thumb-box">—</div>
+          <div class="thumb-cap">Sagittal</div>
+        </div>
+      </div>
+
+      <div id="preview-info" class="preview-info"></div>
+    </div>
+
+    <!-- Recent studies -->
+    <div class="pacs-section" id="recent-section" style="display:none">
+      <div class="section-label">RECENT</div>
+      <div id="recent-list" class="recent-list"></div>
+    </div>
+
+    <!-- Launch button -->
+    <div class="launch-area">
+      <button id="launch-btn" class="launch-btn" disabled>
+        Open in 3D Viewer &nbsp;→
+      </button>
+    </div>
+
+  </div><!-- /pacs-right -->
+
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-const searchBtn   = document.getElementById("search-btn");
-const searchInput = document.getElementById("search-input");
-const resultsList = document.getElementById("search-results");
+// ── Recent studies (localStorage) ────────────────────────────────────────
+const RECENT_KEY = "biplane_recent_v1";
+const RECENT_MAX = 10;
 
+function getRecent() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveRecent(studyId, cacheId, patient, date, desc) {
+  let list = getRecent().filter(r => r.cacheId !== cacheId);  // dedup by cacheId
+  list.unshift({ studyId, cacheId, patient, date, desc, loadedAt: Date.now() });
+  list = list.slice(0, RECENT_MAX);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+}
+
+// ── State ─────────────────────────────────────────────────────────────────
+let selectedStudyId   = null;
+let selectedInstances = [];   // array of {id, n_frames, inst_num, idx}
+let allInstances      = [];   // full list from server
+let selectedPatient   = "";
+let selectedDate      = "";
+let selectedDesc      = "";
+
+// ── Elements ──────────────────────────────────────────────────────────────
+const searchInput    = document.getElementById("search-input");
+const searchBtn      = document.getElementById("search-btn");
+const searchStatus   = document.getElementById("search-status");
+const studiesList    = document.getElementById("studies-list");
+const recordingsList = document.getElementById("recordings-list");
+const selectAllBtn   = document.getElementById("select-all-btn");
+const prevTrans      = document.getElementById("prev-trans");
+const prevSag        = document.getElementById("prev-sag");
+const previewInfo    = document.getElementById("preview-info");
+const launchBtn      = document.getElementById("launch-btn");
+
+// ── Events ────────────────────────────────────────────────────────────────
 searchBtn.addEventListener("click", doSearch);
 searchInput.addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+launchBtn.addEventListener("click", launchViewer);
+selectAllBtn.addEventListener("click", selectAll);
 
+// Render recent list on load
+renderRecent();
+
+// ── Search ────────────────────────────────────────────────────────────────
 async function doSearch() {
   const name = searchInput.value.trim();
   if (!name) return;
-  resultsList.innerHTML = '<p class="loading-msg">Searching…</p>';
 
-  const resp = await fetch("/api/search/", {
-    method: "POST",
-    headers: {"Content-Type": "application/json", "X-CSRFToken": getCookie("csrftoken")},
-    body: JSON.stringify({patient_name: name}),
-  });
-  const data = await resp.json();
+  setStatus("Contacting server…", "loading");
+  searchBtn.disabled = true;
+  searchBtn.textContent = "Searching…";
+  studiesList.innerHTML = '<div class="list-loading">Searching…</div>';
+  recordingsList.innerHTML = '<div class="list-placeholder">Select a study above.</div>';
+  clearPreview();
+  selectedStudyId   = null;
+  selectedInstances = [];
+  launchBtn.disabled = true;
 
-  if (data.error) {
-    resultsList.innerHTML = `<p class="error-msg">${data.error}</p>`;
-    return;
+  try {
+    const resp = await fetch("/api/search/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrfToken() },
+      body: JSON.stringify({ patient_name: name }),
+    });
+    const data = await resp.json();
+
+    searchBtn.disabled = false;
+    searchBtn.textContent = "Search";
+
+    if (data.error) { setStatus("Search error: " + data.error, "error"); studiesList.innerHTML = ""; return; }
+    if (!data.studies.length) { setStatus("No studies found.", "error"); studiesList.innerHTML = '<div class="list-placeholder">No results.</div>'; return; }
+
+    // Sort newest first (matches desktop)
+    data.studies.sort((a, b) => (b.study_date || "").localeCompare(a.study_date || ""));
+
+    renderStudies(data.studies);
+    setStatus(`✓  ${data.studies.length} studies found (newest first). Select one.`, "ok");
+
+  } catch (e) {
+    searchBtn.disabled = false;
+    searchBtn.textContent = "Search";
+    setStatus("Network error: " + e.message, "error");
   }
-  if (!data.studies.length) {
-    resultsList.innerHTML = '<p class="muted">No studies found.</p>';
-    return;
-  }
-
-  resultsList.innerHTML = data.studies.map(s => `
-    <div class="study-card">
-      <div class="study-info">
-        <strong>${s.patient_name}</strong>
-        <span class="muted">ID: ${s.patient_id}</span>
-        <span class="muted">Date: ${formatDate(s.study_date)}</span>
-        <span class="muted">${s.description}</span>
-      </div>
-      <button class="load-btn" onclick="loadStudy('${s.id}')">Open 3D Viewer</button>
-    </div>
-  `).join("");
 }
 
-async function loadStudy(studyId) {
-  const resp = await fetch(`/api/load/${studyId}/`, {
-    method: "POST",
-    headers: {"X-CSRFToken": getCookie("csrftoken")},
-  });
-  const data = await resp.json();
+// ── Render studies list ───────────────────────────────────────────────────
+function renderStudies(studies) {
+  studiesList.innerHTML = "";
+  studies.forEach(s => {
+    const patient = (s.patient_name || "Unknown").replace(/\^/g, ", ");
+    const date    = formatDate(s.study_date);
+    const desc    = s.description || "—";
 
-  if (data.status === "ready") {
-    window.location.href = `/viewer/${studyId}/`;
-  } else {
-    window.location.href = `/viewer/${studyId}/?job_id=${data.job_id}`;
+    const row = document.createElement("div");
+    row.className = "list-item";
+    row.innerHTML = `
+      <span class="li-date">${date}</span>
+      <span class="li-patient">${patient}</span>
+      <span class="li-desc">${desc}</span>`;
+    row.addEventListener("click", () => {
+      selectedPatient = patient;
+      selectedDate    = date;
+      selectedDesc    = desc;
+      selectStudy(s.id, row, patient, date, desc);
+    });
+    studiesList.appendChild(row);
+  });
+}
+
+// ── Select study → load recordings ───────────────────────────────────────
+async function selectStudy(studyId, rowEl, patient, date, desc) {
+  // Highlight selected row
+  document.querySelectorAll("#studies-list .list-item").forEach(r => r.classList.remove("selected"));
+  rowEl.classList.add("selected");
+
+  selectedStudyId   = studyId;
+  selectedInstances = [];
+  allInstances      = [];
+  launchBtn.disabled = true;
+  selectAllBtn.style.display = "none";
+  clearPreview();
+
+  recordingsList.innerHTML = '<div class="list-loading">Loading recordings…</div>';
+  setStatus("Locating biplane recordings…", "loading");
+
+  try {
+    const resp = await fetch(`/api/instances/${studyId}/`);
+    const data = await resp.json();
+
+    if (data.error) {
+      recordingsList.innerHTML = '<div class="list-placeholder error">No biplane recordings found.</div>';
+      setStatus("No biplane recordings found in this study.", "error");
+      return;
+    }
+
+    renderRecordings(data.instances, studyId, patient, date);
+    setStatus(`✓  ${data.instances.length} recording part(s) found. Select which to load.`, "ok");
+
+  } catch (e) {
+    setStatus("Error fetching recordings: " + e.message, "error");
   }
+}
+
+// ── Render recordings list ────────────────────────────────────────────────
+function renderRecordings(instances, studyId, patient, date) {
+  recordingsList.innerHTML = "";
+  allInstances = instances;
+  selectAllBtn.style.display = "inline-block";
+
+  instances.forEach((inst, i) => {
+    const row = document.createElement("div");
+    row.className = "list-item";   // none selected by default
+    row.dataset.id = inst.id;
+    row.innerHTML = `
+      <span class="li-rec">Recording part ${i + 1}</span>
+      <span class="li-frames">${inst.n_frames} frames</span>
+      <span class="li-inst">Instance #${inst.inst_num}</span>`;
+
+    row.addEventListener("click", () => toggleRecording(row, instances, studyId, patient, date));
+    recordingsList.appendChild(row);
+  });
+
+  selectedInstances = [];
+  launchBtn.disabled = true;
+  clearPreview();
+  setStatus(`${instances.length} recording part(s) found. Select which to load.`, "ok");
+}
+
+function selectAll() {
+  recordingsList.querySelectorAll(".list-item").forEach(r => r.classList.add("selected"));
+  selectedInstances = [...allInstances];
+  launchBtn.disabled = false;
+  const total = selectedInstances.reduce((s, i) => s + parseInt(i.n_frames || 0), 0);
+  setStatus(`${selectedInstances.length} part(s) selected — ${total} frames.  Loading preview…`, "loading");
+  loadPreview(selectedStudyId, "", "", selectedInstances);
+}
+
+function toggleRecording(rowEl, allInstances, studyId, patient, date) {
+  rowEl.classList.toggle("selected");
+  const selectedIds = new Set(
+    [...recordingsList.querySelectorAll(".list-item.selected")].map(r => r.dataset.id)
+  );
+  selectedInstances = allInstances.filter(i => selectedIds.has(i.id));
+  launchBtn.disabled = selectedInstances.length === 0;
+
+  if (selectedInstances.length > 0) {
+    const total = selectedInstances.reduce((s, i) => s + parseInt(i.n_frames || 0), 0);
+    setStatus(`${selectedInstances.length} part(s) selected — ${total} frames.  Loading preview…`, "loading");
+    loadPreview(studyId, patient, date, selectedInstances);
+  } else {
+    clearPreview();
+    setStatus("No recording selected.", "error");
+  }
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────
+function loadPreview(studyId, patient, date, instances) {
+  prevTrans.innerHTML = '<span class="thumb-loading">⏳</span>';
+  prevSag.innerHTML   = '<span class="thumb-loading">⏳</span>';
+
+  const total = instances.reduce((s, i) => s + parseInt(i.n_frames || 0), 0);
+  previewInfo.innerHTML = `
+    <div><span class="info-label">Patient</span>${patient}</div>
+    <div><span class="info-label">Date</span>${date}</div>
+    <div><span class="info-label">Parts</span>${instances.length}</div>
+    <div><span class="info-label">Frames</span>${total}</div>`;
+
+  // Load trans preview
+  const imgTrans = new Image();
+  imgTrans.onload = () => { prevTrans.innerHTML = ""; prevTrans.appendChild(imgTrans); };
+  imgTrans.onerror = () => { prevTrans.textContent = "✗"; };
+  imgTrans.src = `/api/preview/${studyId}/trans/?t=${Date.now()}`;
+
+  // Load sag preview
+  const imgSag = new Image();
+  imgSag.onload = () => { prevSag.innerHTML = ""; prevSag.appendChild(imgSag); };
+  imgSag.onerror = () => { prevSag.textContent = "✗"; };
+  imgSag.src = `/api/preview/${studyId}/sag/?t=${Date.now()}`;
+}
+
+function clearPreview() {
+  prevTrans.textContent = "—";
+  prevSag.textContent   = "—";
+  previewInfo.innerHTML = "";
+}
+
+// ── Launch ────────────────────────────────────────────────────────────────
+async function launchViewer() {
+  if (!selectedStudyId || !selectedInstances.length) return;
+
+  launchBtn.disabled    = true;
+  launchBtn.textContent = "Loading…";
+
+  try {
+    const resp = await fetch(`/api/load/${selectedStudyId}/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrfToken() },
+      body: JSON.stringify({ instance_ids: selectedInstances.map(i => i.id) }),
+    });
+    const data = await resp.json();
+
+    if (data.error) {
+      setStatus("Load failed: " + data.error, "error");
+      launchBtn.disabled    = false;
+      launchBtn.textContent = "Open in 3D Viewer →";
+      return;
+    }
+
+    const cacheId = data.cache_id;
+    saveRecent(selectedStudyId, cacheId, selectedPatient, selectedDate, selectedDesc);
+
+    const base    = `/viewer/${selectedStudyId}/?cache_id=${encodeURIComponent(cacheId)}`;
+    if (data.status === "ready") {
+      window.location.href = base;
+    } else {
+      window.location.href = `${base}&job_id=${data.job_id}`;
+    }
+  } catch (e) {
+    setStatus("Network error: " + e.message, "error");
+    launchBtn.disabled    = false;
+    launchBtn.textContent = "Open in 3D Viewer →";
+  }
+}
+
+async function renderRecent() {
+  const list = getRecent();
+  const section = document.getElementById("recent-section");
+  const container = document.getElementById("recent-list");
+  if (!list.length) { section.style.display = "none"; return; }
+
+  section.style.display = "";
+  container.innerHTML = "";
+
+  await Promise.all(list.map(async entry => {
+    let ready = false;
+    try {
+      const resp = await fetch(`/api/status/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`);
+      const data = await resp.json();
+      ready = data.status === "ready";
+    } catch {}
+
+    const row = document.createElement("div");
+    row.className = "recent-row" + (ready ? " recent-ready" : " recent-expired");
+    row.title = ready ? "Cached — click to open directly" : "No longer cached — will re-download";
+    row.innerHTML = `
+      <div class="recent-badge" title="${ready ? "Downloaded & cached" : "Expired from cache"}">
+        ${ready
+          ? `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+               <circle cx="8" cy="8" r="7" fill="#1a6e3c" stroke="#2ecc71" stroke-width="1"/>
+               <path d="M5 8l2 2 4-4" stroke="#2ecc71" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+             </svg>`
+          : `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+               <circle cx="8" cy="8" r="7" fill="#2a2a2a" stroke="#444" stroke-width="1"/>
+               <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="#555" stroke-width="1.5" stroke-linecap="round"/>
+             </svg>`}
+      </div>
+      <div class="recent-info">
+        <span class="recent-patient">${entry.patient}</span>
+        <span class="recent-meta">${entry.date}${entry.desc ? " · " + entry.desc : ""}</span>
+      </div>`;
+
+    row.addEventListener("click", () => {
+      if (ready) {
+        window.location.href = `/viewer/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`;
+      } else {
+        // Pre-fill search with patient name and trigger search
+        searchInput.value = entry.patient.split(",")[0].trim();
+        doSearch();
+      }
+    });
+
+    container.appendChild(row);
+  }));
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function setStatus(msg, state) {
+  const colors = { ok: "#33cc66", error: "#ff4444", loading: "#E0881A", info: "#505050" };
+  searchStatus.textContent = msg;
+  searchStatus.style.color = colors[state] || colors.info;
 }
 
 function formatDate(d) {
@@ -74,9 +413,8 @@ function formatDate(d) {
   return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}`;
 }
 
-function getCookie(name) {
-  const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return m ? m[2] : "";
+function getCsrfToken() {
+  return document.querySelector("meta[name=csrf-token]")?.content || "";
 }
 </script>
 {% endblock %}

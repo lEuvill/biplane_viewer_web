@@ -4,14 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Biplane Viewer{% endblock %}</title>
+  <link rel="icon" href="data:,">
   {% load static %}
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <link rel="stylesheet" href="{% static 'css/viewer.css' %}">
 </head>
 <body>
   <header class="app-header">
-    <span class="app-logo">&#9632; Biplane Stack Viewer</span>
+    <span class="app-logo">VASOLAB</span>
+    <span class="app-logo-sub">BIPLANE VIEWER</span>
     <nav>
-      <a href="{% url 'search' %}">Search</a>
+      <a href="{% url 'search' %}">&#8592; Search</a>
     </nav>
   </header>
   <main>

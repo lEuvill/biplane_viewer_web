@@ -30,7 +30,7 @@ def _get_session() -> requests.Session:
     return _local.session
 
 
-def _orhttp(method: str, path: str, timeout: int = 30, **kwargs):
+def _orhttp(method: str, path: str, timeout: int = 60, **kwargs):
     url  = settings.ORTHANC_URL.rstrip("/") + path
     resp = _get_session().request(method, url, timeout=timeout, **kwargs)
     resp.raise_for_status()
@@ -58,11 +58,25 @@ def orthanc_find_studies(patient_name: str) -> list:
     return _orhttp("POST", "/tools/find", json=body).json()
 
 
+def orthanc_get_instances_by_ids(instance_ids: list) -> list:
+    """Fetch instance metadata for a specific list of Orthanc instance IDs."""
+    instances = []
+    for iid in instance_ids:
+        try:
+            inst = _orhttp("GET", f"/instances/{iid}", timeout=120).json()
+            instances.append(inst)
+        except Exception as e:
+            print(f"Warning: could not fetch instance {iid}: {e}")
+    if not instances:
+        raise ValueError("None of the requested instances could be fetched.")
+    return instances
+
+
 def orthanc_get_biplane_instances(orthanc_study_id: str) -> list:
-    series_list   = _orhttp("GET", f"/studies/{orthanc_study_id}/series").json()
+    series_list   = _orhttp("GET", f"/studies/{orthanc_study_id}/series", timeout=120).json()
     all_instances = []
     for s in series_list:
-        all_instances.extend(_orhttp("GET", f"/series/{s['ID']}/instances").json())
+        all_instances.extend(_orhttp("GET", f"/series/{s['ID']}/instances", timeout=120).json())
 
     biplane = [
         inst for inst in all_instances
@@ -103,10 +117,13 @@ def orthanc_fetch_frame_bgr(instance_id: str, frame_n: int) -> np.ndarray:
 
 # ── DICOM download + decode ───────────────────────────────────────────────────
 
-def _download_instance_bytes(inst_id: str, cancel_flag=None) -> bytes:
+def _download_instance_bytes(inst_id: str, cancel_flag=None, chunk_cb=None) -> bytes:
     url  = settings.ORTHANC_URL.rstrip("/") + f"/instances/{inst_id}/file"
-    resp = _get_session().get(url, timeout=300, stream=True)
+    resp = _get_session().get(url, timeout=(30, None), stream=True)
     resp.raise_for_status()
+    content_length = int(resp.headers.get("content-length", 0))
+    if chunk_cb:
+        chunk_cb(0, content_length)   # register expected size immediately
     buf = BytesIO()
     for chunk in resp.iter_content(chunk_size=512 * 1024):
         if cancel_flag and cancel_flag[0]:
@@ -114,21 +131,40 @@ def _download_instance_bytes(inst_id: str, cancel_flag=None) -> bytes:
             raise RuntimeError("Cancelled")
         if chunk:
             buf.write(chunk)
+            if chunk_cb:
+                chunk_cb(len(chunk), 0)   # 0 = already registered total
     return buf.getvalue()
 
 
-def load_frames_from_orthanc(instances, progress_cb=None, cancel_flag=None) -> tuple:
+def load_frames_from_orthanc(instances, progress_cb=None, download_cb=None,
+                              cancel_flag=None) -> tuple:
     """
-    Download all instances (localhost — fast) then decode all frames in parallel.
+    Download all instances then decode all frames in parallel.
     Returns (trans_frames, sag_frames, cursor_fracs).
+    download_cb(bytes_done, bytes_total) — called as chunks arrive.
+    progress_cb(frames_done, frames_total) — called as frames decode.
     """
     from .frame_processor import decode_and_process
 
-    # Phase 1: Download all instances (localhost HTTP, near-instant)
+    # Phase 1: Download all instances in parallel
     dicom_data = [None] * len(instances)
+
+    # Thread-safe byte counters
+    import threading
+    _lock        = threading.Lock()
+    _bytes_done  = [0]
+    _bytes_total = [0]
+
+    def _chunk_cb(chunk_size, content_length):
+        with _lock:
+            _bytes_done[0]  += chunk_size
+            _bytes_total[0] += content_length
+        if download_cb:
+            download_cb(_bytes_done[0], _bytes_total[0])
+
     with ThreadPoolExecutor(max_workers=len(instances)) as pool:
         future_map = {
-            pool.submit(_download_instance_bytes, inst["ID"], cancel_flag): i
+            pool.submit(_download_instance_bytes, inst["ID"], cancel_flag, _chunk_cb): i
             for i, inst in enumerate(instances)
         }
         for fut in as_completed(future_map):

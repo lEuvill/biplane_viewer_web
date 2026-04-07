@@ -40,6 +40,12 @@ def set_status(study_id: str, status: str, job_id: str = ""):
     cache.set(f"study:{study_id}:status", status, timeout=FRAME_TTL)
     if job_id:
         cache.set(f"study:{study_id}:job_id", job_id, timeout=FRAME_TTL)
+        # Reverse lookup: job_id → study_id (so the WS consumer can find it)
+        cache.set(f"job:{job_id}:study_id", study_id, timeout=FRAME_TTL)
+
+
+def get_study_id_for_job(job_id: str) -> str | None:
+    return cache.get(f"job:{job_id}:study_id")
 
 
 def get_status(study_id: str) -> dict:

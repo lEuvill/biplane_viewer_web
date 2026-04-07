@@ -4,53 +4,121 @@
 {% block content %}
 <div class="viewer-layout">
 
-  <!-- Left panel -->
+  <!-- ── Left panel ─────────────────────────────────────── -->
   <div class="viewer-panel" id="panel">
 
+    <!-- Display mode -->
     <div class="panel-section">
-      <label class="panel-label">Display Mode</label>
+      <div class="section-title">DISPLAY MODE</div>
       <div class="radio-group">
-        <label><input type="radio" name="mode" value="stack" checked> Stack</label>
-        <label><input type="radio" name="mode" value="single"> Single</label>
+        <label><input type="radio" name="mode" value="stack"  checked> Stack</label>
+        <label><input type="radio" name="mode" value="single"> Single frame</label>
       </div>
     </div>
 
+    <!-- Opacity & Color -->
     <div class="panel-section">
-      <label class="panel-label">Frame <span id="frame-num">0</span> / <span id="frame-total">{{ n_frames }}</span></label>
-      <input type="range" id="frame-slider" min="0" max="{{ n_frames|add:'-1' }}" value="0" step="1">
-    </div>
-
-    <div class="panel-section">
-      <label class="panel-label">Sagittal X offset</label>
-      <input type="range" id="sag-slider" min="0" max="300" value="{{ cursor_frac|floatformat:0 }}" step="1">
-    </div>
-
-    <div class="panel-section">
-      <label class="panel-label">Camera</label>
-      <div class="btn-group">
-        <button class="cam-btn" data-preset="perspective">3D</button>
-        <button class="cam-btn" data-preset="top">Top</button>
-        <button class="cam-btn" data-preset="front">Front</button>
-        <button class="cam-btn" data-preset="side">Side</button>
+      <div class="section-title">OPACITY &amp; COLOR</div>
+      <div class="slider-row">
+        <span class="sl-label">Transverse</span>
+        <input type="range" id="trans-opacity-slider" min="0" max="100" value="45" step="1">
+        <span class="sl-val" id="trans-opacity-val">0.45</span>
+        <input type="color" id="trans-color-picker" value="#ffffff" title="Transverse tint">
+      </div>
+      <div class="slider-row">
+        <span class="sl-label">Sagittal</span>
+        <input type="range" id="sag-opacity-slider" min="0" max="100" value="65" step="1">
+        <span class="sl-val" id="sag-opacity-val">0.65</span>
+        <input type="color" id="sag-color-picker" value="#ffffff" title="Sagittal tint">
       </div>
     </div>
 
+    <!-- Frame -->
     <div class="panel-section">
-      <label class="panel-label">Playback</label>
-      <div class="btn-group">
-        <button id="play-btn">&#9654; Play</button>
-        <button id="stop-btn">&#9646;&#9646; Stop</button>
+      <div class="section-title">FRAME</div>
+      <div class="slider-row">
+        <span class="sl-label">Frame</span>
+        <input type="range" id="frame-slider" min="0" max="{{ n_frames|add:'-1' }}" value="0" step="1">
+        <span class="sl-val" id="frame-val">1</span>
       </div>
-      <label class="panel-label" style="margin-top:8px">Speed (fps)</label>
-      <input type="range" id="fps-slider" min="1" max="30" value="10" step="1">
-      <span id="fps-val">10</span>
     </div>
 
-  </div>
+    <!-- Sagittal -->
+    <div class="panel-section">
+      <div class="section-title">SAGITTAL</div>
+      <div class="slider-row">
+        <span class="sl-label">Z offset</span>
+        <input type="range" id="sag-z-slider" min="0" max="300" value="150" step="1">
+        <span class="sl-val" id="sag-z-val">150</span>
+      </div>
+      <div class="slider-row">
+        <span class="sl-label">Y depth</span>
+        <input type="range" id="sag-y-slider" min="0" max="300" value="160" step="1">
+        <span class="sl-val" id="sag-y-val">160</span>
+      </div>
+      <div class="slider-row">
+        <span class="sl-label">Clip dist</span>
+        <input type="range" id="sag-clip-slider" min="1" max="300" value="300" step="1">
+        <span class="sl-val" id="sag-clip-val">300</span>
+      </div>
+      <div class="row-inline" style="margin-top:4px">
+        <label class="check-label">
+          <input type="checkbox" id="hide-sag"> Hide sagittal
+        </label>
+        <button class="small-btn" id="sag-reset-btn">Reset</button>
+      </div>
+    </div>
 
-  <!-- 3D Canvas -->
-  <div class="viewer-canvas-wrap">
+    <!-- Camera views -->
+    <div class="panel-section">
+      <div class="section-title">CAMERA VIEWS</div>
+      <div class="cam-grid">
+        <button class="cam-btn" data-preset="perspective">Perspective<br><span>3/4 view</span></button>
+        <button class="cam-btn" data-preset="transverse">Transverse<br><span>face-on</span></button>
+        <button class="cam-btn" data-preset="sagittal_v">Sagittal<br><span>face-on</span></button>
+        <button class="cam-btn" data-preset="top">Top-down<br><span>skin→depth</span></button>
+      </div>
+      <div class="slot-hint">Custom slots — click empty to save · right-click to manage</div>
+      <div class="slots-grid" id="cam-slots"></div>
+    </div>
+
+    <!-- Export video -->
+    <div class="panel-section">
+      <div class="section-title">EXPORT VIDEO</div>
+      <div class="slider-row">
+        <span class="sl-label">FPS</span>
+        <input type="range" id="fps-slider" min="4" max="60" value="12" step="1">
+        <span class="sl-val" id="fps-val">12</span>
+      </div>
+      <button id="export-btn" style="width:100%;margin-top:4px">Export frame loop…</button>
+    </div>
+
+    <!-- ROI mask -->
+    <div class="panel-section">
+      <div class="section-title">ROI MASK</div>
+      <div class="btn-stack">
+        <button id="roi-draw-btn">Draw polygon ROI</button>
+        <button id="roi-clear-btn">Clear ROI</button>
+      </div>
+    </div>
+
+    <!-- Playback -->
+    <div class="panel-section">
+      <div class="section-title">PLAYBACK</div>
+      <button id="play-btn" class="play-btn">&#9654;  Play</button>
+    </div>
+
+  </div><!-- /panel -->
+
+  <!-- ── Canvas area ────────────────────────────────────── -->
+  <div class="viewer-canvas-wrap" id="canvas-wrap">
     <canvas id="three-canvas"></canvas>
+
+    <!-- Header overlay (top of canvas) -->
+    <div class="canvas-header">
+      <span id="hdr-frame">Frame 1 / {{ n_frames }}</span>
+      <span id="hdr-mode" class="mode-badge">STACK</span>
+    </div>
 
     <!-- Loading overlay -->
     <div id="loading-overlay" class="loading-overlay">
@@ -65,282 +133,44 @@
     </div>
   </div>
 
+</div><!-- /viewer-layout -->
+
+<!-- ── ROI modal ───────────────────────────────────────── -->
+<div id="roi-modal" class="modal-backdrop" style="display:none">
+  <div class="modal-box">
+    <div class="modal-hint">
+      Left-click to add vertices &nbsp;·&nbsp; Z = undo last &nbsp;·&nbsp; Needs ≥ 3 points to apply
+    </div>
+    <canvas id="roi-canvas" width="500" height="500"></canvas>
+    <div class="modal-btns">
+      <button id="roi-undo">↩ Undo</button>
+      <button id="roi-clear-pts">✕ Clear</button>
+      <button id="roi-cancel">Cancel</button>
+      <button id="roi-apply" class="accent-btn">Apply ROI</button>
+    </div>
+  </div>
 </div>
+
 {% endblock %}
 
 {% block scripts %}
-<!-- Three.js from CDN -->
+<script>
+  // Pass Django template vars to the module
+  window.VIEWER_CONFIG = {
+    studyId:    "{{ study_id }}",
+    cacheId:    "{{ cache_id }}",
+    nFrames:    {{ n_frames }},
+    cursorFrac: {{ cursor_frac }},
+  };
+</script>
+{% load static %}
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+    "three":          "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/":  "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
   }
 }
 </script>
-<script type="module">
-import * as THREE from "three";
-import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-
-// ── Constants (match desktop constants.py) ────────────────────────────────
-const PROC_W    = 300;
-const PROC_H    = 300;
-const Z_SPACING = 3.0;
-const TR_OPACITY = 0.45;
-const SAG_Z     = 300;
-
-const STUDY_ID   = "{{ study_id }}";
-const N_FRAMES   = {{ n_frames }};
-const CURSOR_FRAC = {{ cursor_frac }};
-
-// ── Three.js setup ────────────────────────────────────────────────────────
-const canvas   = document.getElementById("three-canvas");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setClearColor(0x0d0d0d);
-
-const scene  = new THREE.Scene();
-scene.background = new THREE.Color(0x0d0d0d);
-const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-
-// Resize handler
-function resize() {
-  const wrap = canvas.parentElement;
-  renderer.setSize(wrap.clientWidth, wrap.clientHeight);
-  camera.aspect = wrap.clientWidth / wrap.clientHeight;
-  camera.updateProjectionMatrix();
-}
-window.addEventListener("resize", resize);
-resize();
-
-// Render loop
-function animate() {
-  requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
-}
-animate();
-
-// ── Camera presets ────────────────────────────────────────────────────────
-const cx = PROC_W / 2, cy = PROC_H / 2, cz = (N_FRAMES - 1) * Z_SPACING / 2;
-controls.target.set(cx, cy, cz);
-
-const PRESETS = {
-  perspective: { pos: [cx + 450, cy + 350, cz + 500], up: [0, 1, 0] },
-  top:         { pos: [cx, cy + 800, cz],              up: [0, 0, -1] },
-  front:       { pos: [cx, cy, cz - 600],              up: [0, 1, 0] },
-  side:        { pos: [cx + 600, cy, cz],              up: [0, 1, 0] },
-};
-
-function applyPreset(name) {
-  const p = PRESETS[name];
-  camera.position.set(...p.pos);
-  camera.up.set(...p.up);
-  controls.target.set(cx, cy, cz);
-  controls.update();
-}
-applyPreset("perspective");
-
-// ── Scene objects ─────────────────────────────────────────────────────────
-let stackMeshes  = [];   // transverse planes
-let sagMesh      = null; // sagittal plane
-let currentFrame = 0;
-let displayMode  = "stack";
-
-const loader = new THREE.TextureLoader();
-
-function frameUrl(idx, plane) {
-  return `/api/frames/${STUDY_ID}/${idx}/${plane}/`;
-}
-
-function buildStack() {
-  // Remove old
-  stackMeshes.forEach(m => scene.remove(m));
-  stackMeshes = [];
-
-  for (let i = 0; i < N_FRAMES; i++) {
-    const geo = new THREE.PlaneGeometry(PROC_W, PROC_H);
-    const mat = new THREE.MeshBasicMaterial({
-      map: loader.load(frameUrl(i, "trans")),
-      transparent: true,
-      opacity: TR_OPACITY,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(PROC_W / 2, PROC_H / 2, i * Z_SPACING);
-    scene.add(mesh);
-    stackMeshes.push(mesh);
-  }
-}
-
-function buildSingle(idx) {
-  stackMeshes.forEach(m => scene.remove(m));
-  stackMeshes = [];
-
-  const geo = new THREE.PlaneGeometry(PROC_W, PROC_H);
-  const mat = new THREE.MeshBasicMaterial({
-    map: loader.load(frameUrl(idx, "trans")),
-    transparent: true,
-    opacity: 1.0,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(PROC_W / 2, PROC_H / 2, idx * Z_SPACING);
-  scene.add(mesh);
-  stackMeshes.push(mesh);
-}
-
-function buildSagittal(frameIdx, xOffset) {
-  if (sagMesh) scene.remove(sagMesh);
-
-  const geo = new THREE.PlaneGeometry(SAG_Z, PROC_H);
-  // Rotate 90° around Y so it stands vertical along the Z axis
-  geo.applyMatrix4(new THREE.Matrix4().makeRotationY(Math.PI / 2));
-
-  const mat = new THREE.MeshBasicMaterial({
-    map: loader.load(frameUrl(frameIdx, "sag")),
-    transparent: true,
-    opacity: 0.7,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  });
-  sagMesh = new THREE.Mesh(geo, mat);
-  sagMesh.position.set(xOffset, PROC_H / 2, SAG_Z / 2);
-  scene.add(sagMesh);
-}
-
-// ── Controls wiring ───────────────────────────────────────────────────────
-const frameSlider = document.getElementById("frame-slider");
-const sagSlider   = document.getElementById("sag-slider");
-const frameNum    = document.getElementById("frame-num");
-
-// Init sagittal X from cursor fraction
-sagSlider.value = Math.round(CURSOR_FRAC * PROC_W);
-
-frameSlider.addEventListener("input", () => {
-  currentFrame = parseInt(frameSlider.value);
-  frameNum.textContent = currentFrame;
-  if (displayMode === "single") buildSingle(currentFrame);
-  buildSagittal(currentFrame, parseInt(sagSlider.value));
-});
-
-sagSlider.addEventListener("input", () => {
-  buildSagittal(currentFrame, parseInt(sagSlider.value));
-});
-
-document.querySelectorAll("input[name=mode]").forEach(r => {
-  r.addEventListener("change", () => {
-    displayMode = r.value;
-    if (displayMode === "stack")  buildStack();
-    else                          buildSingle(currentFrame);
-    buildSagittal(currentFrame, parseInt(sagSlider.value));
-  });
-});
-
-document.querySelectorAll(".cam-btn").forEach(btn => {
-  btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
-});
-
-// Playback
-let playTimer = null;
-const fpsSlider = document.getElementById("fps-slider");
-const fpsVal    = document.getElementById("fps-val");
-fpsSlider.addEventListener("input", () => {
-  fpsVal.textContent = fpsSlider.value;
-  if (playTimer) startPlay();
-});
-
-function startPlay() {
-  stopPlay();
-  const fps = parseInt(fpsSlider.value);
-  playTimer = setInterval(() => {
-    currentFrame = (currentFrame + 1) % N_FRAMES;
-    frameSlider.value = currentFrame;
-    frameNum.textContent = currentFrame;
-    if (displayMode === "single") buildSingle(currentFrame);
-    buildSagittal(currentFrame, parseInt(sagSlider.value));
-  }, 1000 / fps);
-}
-function stopPlay() {
-  if (playTimer) { clearInterval(playTimer); playTimer = null; }
-}
-
-document.getElementById("play-btn").addEventListener("click", startPlay);
-document.getElementById("stop-btn").addEventListener("click", stopPlay);
-
-// ── Loading / WebSocket ───────────────────────────────────────────────────
-const overlay   = document.getElementById("loading-overlay");
-const phaseEl   = document.getElementById("load-phase");
-const pctEl     = document.getElementById("load-pct");
-const barEl     = document.getElementById("progress-bar");
-
-function setProgress(pct, label) {
-  barEl.style.width = pct + "%";
-  pctEl.textContent = Math.round(pct) + "%";
-  phaseEl.textContent = label;
-}
-
-function onLoadComplete() {
-  overlay.style.display = "none";
-  buildStack();
-  buildSagittal(currentFrame, Math.round(CURSOR_FRAC * PROC_W));
-}
-
-const params = new URLSearchParams(window.location.search);
-const jobId  = params.get("job_id");
-
-if (N_FRAMES > 0 && !jobId) {
-  // Already cached — show immediately
-  onLoadComplete();
-} else if (jobId) {
-  // Connect WebSocket and wait for completion
-  const wsProto = location.protocol === "https:" ? "wss" : "ws";
-  const ws = new WebSocket(`${wsProto}://${location.host}/ws/progress/${jobId}/`);
-
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.phase === "decode") {
-      const pct = msg.total > 0 ? (msg.done / msg.total) * 100 : 0;
-      setProgress(pct, `Decoding frames… ${msg.done}/${msg.total}`);
-    } else if (msg.phase === "storing") {
-      setProgress(95, "Storing frames…");
-    } else if (msg.phase === "complete") {
-      setProgress(100, "Done!");
-      // Reload page without job_id so it hits the cache
-      window.location.href = `/viewer/${STUDY_ID}/`;
-    } else if (msg.phase === "error") {
-      phaseEl.textContent = "Error: " + msg.msg;
-      phaseEl.style.color = "#e74c3c";
-    } else if (msg.phase === "init") {
-      setProgress(0, msg.msg);
-    }
-  };
-
-  ws.onerror = () => {
-    phaseEl.textContent = "Connection error — please refresh.";
-  };
-} else {
-  // No job_id and no frames — trigger load
-  fetch(`/api/load/${STUDY_ID}/`, {
-    method: "POST",
-    headers: {"X-CSRFToken": getCookie("csrftoken")},
-  }).then(r => r.json()).then(data => {
-    if (data.status === "ready") {
-      onLoadComplete();
-    } else {
-      window.location.href = `/viewer/${STUDY_ID}/?job_id=${data.job_id}`;
-    }
-  });
-}
-
-function getCookie(name) {
-  const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return m ? m[2] : "";
-}
-</script>
+<script type="module" src="{% static 'js/viewer.js' %}"></script>
 {% endblock %}
