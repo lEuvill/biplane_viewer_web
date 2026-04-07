@@ -296,6 +296,48 @@ button:disabled  { opacity: 0.4; cursor: default; }
 .recent-row:hover .recent-remove  { opacity: 1; }
 .recent-remove:hover               { color: #e05555; }
 
+/* Star / bookmark button */
+.star-btn {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 2px;
+  color: #333;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+  line-height: 1;
+}
+.recent-row:hover .star-btn { opacity: 1; }
+.star-btn.starred            { opacity: 1; color: #f5c518; }
+.star-btn:hover              { color: #f5c518; }
+
+/* Context menu danger item */
+.ctx-danger { color: #e05555 !important; }
+.ctx-danger:hover { background: #2a1010 !important; }
+
+/* Toast notification */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  background: #1e1e1e;
+  border: 1px solid #333;
+  color: #33cc66;
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+  z-index: 9999;
+}
+.toast.toast-show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 .launch-area { margin-top: auto; padding-top: 8px; }
 .launch-btn {
   width: 100%;
