@@ -6,9 +6,14 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-change-me-in-production")
-DEBUG = os.getenv("DEBUG", "True") == "True"
+SECRET_KEY = os.environ["SECRET_KEY"]   # no fallback — must be set explicitly
+DEBUG = os.getenv("DEBUG", "False") == "True"
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+
+# Required in production when behind a reverse proxy / HTTPS
+CSRF_TRUSTED_ORIGINS = [
+    h for h in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if h
+]
 
 INSTALLED_APPS = [
     "daphne",                           # must be first — overrides runserver
@@ -24,6 +29,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",   # serves static files in production
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -68,32 +74,44 @@ CHANNEL_LAYERS = {
     }
 }
 
+FRAME_TTL = int(os.getenv("FRAME_TTL", "86400"))   # default 24 h; lower if RAM is tight
+
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL + "/1",
-        "TIMEOUT": 7200,  # 2 hours
+        "TIMEOUT": FRAME_TTL,
     }
 }
 
 # ── Celery ────────────────────────────────────────────────────────────────────
-CELERY_BROKER_URL = REDIS_URL + "/2"
-CELERY_RESULT_BACKEND = REDIS_URL + "/2"
-CELERY_TASK_SERIALIZER = "json"
+CELERY_BROKER_URL        = REDIS_URL + "/2"
+CELERY_RESULT_BACKEND    = REDIS_URL + "/2"
+CELERY_TASK_SERIALIZER   = "json"
 CELERY_RESULT_SERIALIZER = "json"
 
-# ── Orthanc ───────────────────────────────────────────────────────────────────
-ORTHANC_URL  = os.getenv("ORTHANC_URL",  "https://pacs.vasolabs.com")
-ORTHANC_USER = os.getenv("ORTHANC_USER", "joshua")
-ORTHANC_PASS = os.getenv("ORTHANC_PASS", "V@sol4bs!!")
+# ── Orthanc PACS ──────────────────────────────────────────────────────────────
+ORTHANC_URL  = os.getenv("ORTHANC_URL")    # required — no fallback
+ORTHANC_USER = os.getenv("ORTHANC_USER")   # required — no fallback
+ORTHANC_PASS = os.getenv("ORTHANC_PASS")   # required — no fallback
 
 # ── Static files ──────────────────────────────────────────────────────────────
-STATIC_URL = "/static/"
+STATIC_URL  = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"     # populated by: python manage.py collectstatic
 STATICFILES_DIRS = [BASE_DIR / "static"]
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
-USE_I18N = True
-USE_TZ = True
+TIME_ZONE     = "UTC"
+USE_I18N      = True
+USE_TZ        = True
+
+# ── Production security (only when DEBUG=False) ───────────────────────────────
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE   = True
+    CSRF_COOKIE_SECURE      = True
+    SECURE_BROWSER_XSS_FILTER   = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True

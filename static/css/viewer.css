@@ -269,6 +269,33 @@ button:disabled  { opacity: 0.4; cursor: default; }
 .recent-info            { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .recent-patient         { font-size: 12px; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .recent-meta            { font-size: 10px; color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-rec             { font-size: 10px; color: #3a7a5a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recent-right {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.recent-time {
+  font-size: 10px;
+  color: #444;
+  white-space: nowrap;
+}
+.recent-remove {
+  background: none;
+  border: none;
+  color: #444;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.1s, color 0.1s;
+}
+.recent-row:hover .recent-remove  { opacity: 1; }
+.recent-remove:hover               { color: #e05555; }
 
 .launch-area { margin-top: auto; padding-top: 8px; }
 .launch-btn {

@@ -93,9 +93,12 @@ function getRecent() {
   catch { return []; }
 }
 
-function saveRecent(studyId, cacheId, patient, date, desc) {
+function saveRecent(studyId, cacheId, patient, date, desc, instances) {
+  const parts      = instances.length;
+  const totalFrames = instances.reduce((s, i) => s + parseInt(i.n_frames || 0), 0);
+  const instNums   = instances.map(i => `#${i.inst_num}`).join(", ");
   let list = getRecent().filter(r => r.cacheId !== cacheId);  // dedup by cacheId
-  list.unshift({ studyId, cacheId, patient, date, desc, loadedAt: Date.now() });
+  list.unshift({ studyId, cacheId, patient, date, desc, parts, totalFrames, instNums, loadedAt: Date.now() });
   list = list.slice(0, RECENT_MAX);
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
 }
@@ -335,7 +338,7 @@ async function launchViewer() {
     }
 
     const cacheId = data.cache_id;
-    saveRecent(selectedStudyId, cacheId, selectedPatient, selectedDate, selectedDesc);
+    saveRecent(selectedStudyId, cacheId, selectedPatient, selectedDate, selectedDesc, selectedInstances);
 
     const base    = `/viewer/${selectedStudyId}/?cache_id=${encodeURIComponent(cacheId)}`;
     if (data.status === "ready") {
@@ -350,8 +353,18 @@ async function launchViewer() {
   }
 }
 
+function timeAgo(ts) {
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60)                       return "just now";
+  if (s < 3600)                     return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400)                    return `${Math.floor(s / 3600)}h ago`;
+  if (s < 86400 * 2)                return "yesterday";
+  if (s < 86400 * 7)                return `${Math.floor(s / 86400)}d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
 async function renderRecent() {
-  const list = getRecent();
+  const list = getRecent().sort((a, b) => (b.loadedAt ?? 0) - (a.loadedAt ?? 0));
   const section = document.getElementById("recent-section");
   const container = document.getElementById("recent-list");
   if (!list.length) { section.style.display = "none"; return; }
@@ -359,14 +372,17 @@ async function renderRecent() {
   section.style.display = "";
   container.innerHTML = "";
 
-  await Promise.all(list.map(async entry => {
-    let ready = false;
+  // Fetch all statuses in parallel, then render in sorted order
+  const statuses = await Promise.all(list.map(async entry => {
     try {
       const resp = await fetch(`/api/status/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`);
       const data = await resp.json();
-      ready = data.status === "ready";
-    } catch {}
+      return data.status === "ready";
+    } catch { return false; }
+  }));
 
+  list.forEach((entry, i) => {
+    const ready = statuses[i];
     const row = document.createElement("div");
     row.className = "recent-row" + (ready ? " recent-ready" : " recent-expired");
     row.title = ready ? "Cached — click to open directly" : "No longer cached — will re-download";
@@ -385,20 +401,40 @@ async function renderRecent() {
       <div class="recent-info">
         <span class="recent-patient">${entry.patient}</span>
         <span class="recent-meta">${entry.date}${entry.desc ? " · " + entry.desc : ""}</span>
+        <span class="recent-rec">${entry.parts ?? "?"} part${(entry.parts ?? 0) !== 1 ? "s" : ""} · ${entry.totalFrames ?? "?"} frames · inst ${entry.instNums ?? "—"}</span>
+      </div>
+      <div class="recent-right">
+        <span class="recent-time">${entry.loadedAt ? timeAgo(entry.loadedAt) : ""}</span>
+        <button class="recent-remove" title="Remove from recent">✕</button>
       </div>`;
 
+    row.querySelector(".recent-remove").addEventListener("click", e => {
+      e.stopPropagation();   // don't trigger the row open
+      const updated = getRecent().filter(r => r.cacheId !== entry.cacheId);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+      row.remove();
+      if (!document.getElementById("recent-list").children.length) {
+        document.getElementById("recent-section").style.display = "none";
+      }
+    });
+
     row.addEventListener("click", () => {
+      // Bump loadedAt so this entry rises to the top on next render
+      const updated = getRecent().map(r =>
+        r.cacheId === entry.cacheId ? { ...r, loadedAt: Date.now() } : r
+      );
+      localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+
       if (ready) {
         window.location.href = `/viewer/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`;
       } else {
-        // Pre-fill search with patient name and trigger search
         searchInput.value = entry.patient.split(",")[0].trim();
         doSearch();
       }
     });
 
     container.appendChild(row);
-  }));
+  });
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────

@@ -12,8 +12,9 @@ Key scheme:
 
 import json
 from django.core.cache import cache
+from django.conf import settings
 
-FRAME_TTL = 7200  # 2 hours
+FRAME_TTL = settings.FRAME_TTL
 
 
 def store_frame(study_id: str, frame_idx: int, trans_png: bytes, sag_png: bytes):

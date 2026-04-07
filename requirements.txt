@@ -6,6 +6,7 @@ celery>=5.3
 redis>=5.0
 django-redis>=5.4
 python-dotenv>=1.0
+whitenoise>=6.7
 pydicom>=2.4
 pylibjpeg>=2.0
 numpy>=1.24
