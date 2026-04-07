@@ -58,7 +58,7 @@ resize();
 let displayMode  = "stack";
 let currentFrame = 0;
 let sagZOffset   = Math.round(cursorFrac * SAG_Z);   // matches z_offset in desktop
-let sagYCenter   = 160;
+let sagYCenter   = 140;
 let sagClipDist  = SAG_Z;
 let sagHidden    = false;
 let roiMask      = null;   // offscreen canvas or null
@@ -662,9 +662,9 @@ document.getElementById("hide-sag").addEventListener("change", e => {
 
 // Reset sagittal
 document.getElementById("sag-reset-btn").addEventListener("click", () => {
-  sagYCenter  = 160;
+  sagYCenter  = 140;
   sagClipDist = SAG_Z;
-  sagYSlider.value      = 160;  document.getElementById("sag-y-val").textContent   = 160;
+  sagYSlider.value      = 140;  document.getElementById("sag-y-val").textContent   = 140;
   sagClipSlider.value   = SAG_Z; document.getElementById("sag-clip-val").textContent = SAG_Z;
   buildSagittal();
 });
