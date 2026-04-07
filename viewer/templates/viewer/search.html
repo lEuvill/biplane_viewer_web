@@ -94,11 +94,12 @@ function getRecent() {
 }
 
 function saveRecent(studyId, cacheId, patient, date, desc, instances) {
-  const parts      = instances.length;
+  const parts       = instances.length;
   const totalFrames = instances.reduce((s, i) => s + parseInt(i.n_frames || 0), 0);
-  const instNums   = instances.map(i => `#${i.inst_num}`).join(", ");
-  let list = getRecent().filter(r => r.cacheId !== cacheId);  // dedup by cacheId
-  list.unshift({ studyId, cacheId, patient, date, desc, parts, totalFrames, instNums, loadedAt: Date.now() });
+  const instNums    = instances.map(i => `#${i.inst_num}`).join(", ");
+  const instanceIds = instances.map(i => i.id);   // Orthanc IDs — needed for auto-reselect
+  let list = getRecent().filter(r => r.cacheId !== cacheId);
+  list.unshift({ studyId, cacheId, patient, date, desc, parts, totalFrames, instNums, instanceIds, loadedAt: Date.now() });
   list = list.slice(0, RECENT_MAX);
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
 }
@@ -110,6 +111,7 @@ let allInstances      = [];   // full list from server
 let selectedPatient   = "";
 let selectedDate      = "";
 let selectedDesc      = "";
+let pendingAutoSelect = null; // { studyId, instanceIds } — set when a recent entry is clicked
 
 // ── Elements ──────────────────────────────────────────────────────────────
 const searchInput    = document.getElementById("search-input");
@@ -195,6 +197,11 @@ function renderStudies(studies) {
       selectStudy(s.id, row, patient, date, desc);
     });
     studiesList.appendChild(row);
+
+    // Auto-select this row if a recent entry is being restored
+    if (pendingAutoSelect && s.id === pendingAutoSelect.studyId) {
+      row.click();
+    }
   });
 }
 
@@ -255,6 +262,20 @@ function renderRecordings(instances, studyId, patient, date) {
   launchBtn.disabled = true;
   clearPreview();
   setStatus(`${instances.length} recording part(s) found. Select which to load.`, "ok");
+
+  // Auto-select recordings that match the recent entry
+  if (pendingAutoSelect && pendingAutoSelect.studyId === studyId) {
+    const ids = new Set(pendingAutoSelect.instanceIds || []);
+    if (ids.size) {
+      recordingsList.querySelectorAll(".list-item").forEach(r => {
+        if (ids.has(r.dataset.id)) r.click();
+      });
+    } else {
+      // Older entry without instanceIds — select all
+      selectAll();
+    }
+    pendingAutoSelect = null;
+  }
 }
 
 function selectAll() {
@@ -384,18 +405,18 @@ async function renderRecent() {
   list.forEach((entry, i) => {
     const ready = statuses[i];
     const row = document.createElement("div");
-    row.className = "recent-row" + (ready ? " recent-ready" : " recent-expired");
-    row.title = ready ? "Cached — click to open directly" : "No longer cached — will re-download";
+    row.className = "recent-row";
+    row.title = ready ? "Cached — opens instantly" : "Will auto-reload from Orthanc";
     row.innerHTML = `
-      <div class="recent-badge" title="${ready ? "Downloaded & cached" : "Expired from cache"}">
+      <div class="recent-badge" title="${ready ? "In cache" : "Will reload"}">
         ${ready
           ? `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                <circle cx="8" cy="8" r="7" fill="#1a6e3c" stroke="#2ecc71" stroke-width="1"/>
                <path d="M5 8l2 2 4-4" stroke="#2ecc71" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
              </svg>`
           : `<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-               <circle cx="8" cy="8" r="7" fill="#2a2a2a" stroke="#444" stroke-width="1"/>
-               <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="#555" stroke-width="1.5" stroke-linecap="round"/>
+               <circle cx="8" cy="8" r="7" fill="#1a3a6e" stroke="#4d9de0" stroke-width="1"/>
+               <path d="M8 5v3l2 1" stroke="#4d9de0" stroke-width="1.5" stroke-linecap="round"/>
              </svg>`}
       </div>
       <div class="recent-info">
@@ -409,7 +430,7 @@ async function renderRecent() {
       </div>`;
 
     row.querySelector(".recent-remove").addEventListener("click", e => {
-      e.stopPropagation();   // don't trigger the row open
+      e.stopPropagation();
       const updated = getRecent().filter(r => r.cacheId !== entry.cacheId);
       localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
       row.remove();
@@ -419,18 +440,23 @@ async function renderRecent() {
     });
 
     row.addEventListener("click", () => {
-      // Bump loadedAt so this entry rises to the top on next render
-      const updated = getRecent().map(r =>
-        r.cacheId === entry.cacheId ? { ...r, loadedAt: Date.now() } : r
-      );
-      localStorage.setItem(RECENT_KEY, JSON.stringify(updated));
+      // Bump loadedAt
+      localStorage.setItem(RECENT_KEY, JSON.stringify(
+        getRecent().map(r => r.cacheId === entry.cacheId ? { ...r, loadedAt: Date.now() } : r)
+      ));
 
-      if (ready) {
-        window.location.href = `/viewer/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`;
-      } else {
-        searchInput.value = entry.patient.split(",")[0].trim();
-        doSearch();
-      }
+      // Pre-set state so Open button is immediately usable
+      selectedStudyId   = entry.studyId;
+      selectedPatient   = entry.patient;
+      selectedDate      = entry.date;
+      selectedDesc      = entry.desc;
+      selectedInstances = (entry.instanceIds || []).map(id => ({ id }));
+      launchBtn.disabled = false;
+
+      // Trigger search + auto-highlight study and recordings
+      pendingAutoSelect = { studyId: entry.studyId, instanceIds: entry.instanceIds || [] };
+      searchInput.value = entry.patient.replace(/\^/g, " ").split(",")[0].trim();
+      doSearch();
     });
 
     container.appendChild(row);

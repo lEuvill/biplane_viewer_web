@@ -263,7 +263,6 @@ button:disabled  { opacity: 0.4; cursor: default; }
 }
 .recent-row:hover       { background: #1c1c1c; border-color: var(--border); }
 .recent-ready           { opacity: 1; }
-.recent-expired         { opacity: 0.45; }
 .recent-badge           { flex-shrink: 0; width: 16px; height: 16px; }
 .recent-badge svg       { width: 16px; height: 16px; display: block; }
 .recent-info            { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
