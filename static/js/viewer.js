@@ -80,7 +80,6 @@ function getTexture(idx, plane) {
   const key = `${idx}:${plane}`;
   if (!texCache.has(key)) {
     const tex = loader.load(`/api/frames/${studyId}/${idx}/${plane}/?cache_id=${encodeURIComponent(cacheId)}`);
-    tex.flipY = false;                      // PNG origin is top-left; Three.js is bottom-left
     tex.colorSpace = THREE.NoColorSpace;    // medical frames are linear — skip sRGB decode
     texCache.set(key, tex);
   }
