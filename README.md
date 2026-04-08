@@ -103,6 +103,8 @@ daphne -b 0.0.0.0 -p 8000 biplane_web.asgi:application
 
 Open `http://<server-ip>:8000` in the browser.
 
+> **Note:** Always restart the Celery worker after pulling code changes — it caches imported modules and will not pick up changes automatically.
+
 ---
 
 ## Systemd example (Ubuntu/Debian)
@@ -186,7 +188,8 @@ server {
 | URL | Description |
 |---|---|
 | `/` | Patient search + study/recording selection |
-| `/viewer/<study_id>/` | 3D viewer for a loaded study |
+| `/viewer/<study_id>/` | Full 3D viewer (controls panel + canvas) |
+| `/share/<study_id>/` | Display-only viewer for shared links — no control panel |
 
 ## API
 
@@ -199,3 +202,41 @@ server {
 | `/api/frames/<study_id>/<frame>/<plane>/` | GET | Serve a decoded RGBA PNG frame |
 | `/api/preview/<study_id>/<plane>/` | GET | Serve a small preview JPEG |
 | `/ws/progress/<job_id>/` | WS | Live download/decode progress |
+
+### `POST /api/load/<study_id>/` body parameters
+
+| Field | Type | Description |
+|---|---|---|
+| `instance_ids` | `string[]` | Orthanc instance IDs to load. Empty = load all instances in the study. |
+| `swapped` | `bool` | `true` to swap transverse/sagittal planes (for studies where the image halves are inverted). Default `false`. |
+
+---
+
+## Viewer features
+
+### Full viewer (`/viewer/`)
+- **Display mode** — Stack (all frames as image planes) or Single frame
+- **Opacity & color** — Independent tint and opacity for transverse stack and sagittal plane
+- **Sagittal controls** — Z offset, Y depth, clip distance, hide/show toggle, reset
+- **Camera presets** — Perspective, Transverse, Sagittal, Top-down; 9 custom save slots
+- **Playback** — Play/Stop, Prev/Next frame buttons; FPS slider (4–60)
+- **ViewCube** — Clickable 3D orientation cube; click any face/corner to snap the camera
+- **ROI mask** — Draw a polygon mask on the transverse plane to suppress background
+- **Export** — Export the frame loop as a WebM video
+- **Share link** — Copies a `/share/` URL to clipboard for read-only sharing
+
+### Shared viewer (`/share/`)
+- Full 3D canvas with ViewCube
+- Playback controls (Play/Prev/Next, frame scrubber)
+- Display mode toggle (Stack / Single)
+- FPS slider
+- No control panel — intended for external sharing
+
+### Search page (`/`)
+- Patient name search against Orthanc
+- Per-recording instance selection with frame counts
+- Preview thumbnails for transverse and sagittal planes
+- **Swap button** — swaps the transverse/sagittal assignment when the DICOM image halves are inverted
+- Recent studies list with cache status indicators
+- Bookmarks with right-click context menu
+- Shareable study links from the context menu

@@ -55,6 +55,9 @@
           <div id="prev-trans" class="thumb-box">—</div>
           <div class="thumb-cap">Transverse</div>
         </div>
+        <div class="preview-swap-col">
+          <button id="swap-btn" class="swap-btn" title="Swap planes" disabled>⇅</button>
+        </div>
         <div class="thumb-col">
           <div id="prev-sag" class="thumb-box">—</div>
           <div class="thumb-cap">Sagittal</div>
@@ -108,13 +111,13 @@ function isBookmarked(cacheId) {
   return getBookmarks().some(b => b.cacheId === cacheId);
 }
 
-function saveRecent(studyId, cacheId, patient, date, desc, instances) {
+function saveRecent(studyId, cacheId, patient, date, desc, instances, swapped = false) {
   const parts       = instances.length;
   const totalFrames = instances.reduce((s, i) => s + parseInt(i.n_frames || 0), 0);
   const instNums    = instances.map(i => `#${i.inst_num}`).join(", ");
   const instanceIds = instances.map(i => i.id);
   let list = getRecent().filter(r => r.cacheId !== cacheId);
-  list.unshift({ studyId, cacheId, patient, date, desc, parts, totalFrames, instNums, instanceIds, loadedAt: Date.now() });
+  list.unshift({ studyId, cacheId, patient, date, desc, parts, totalFrames, instNums, instanceIds, swapped, loadedAt: Date.now() });
   list = list.slice(0, RECENT_MAX);
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
 }
@@ -145,13 +148,41 @@ function removeFromRecent(cacheId) {
 }
 
 // ── Entry actions ─────────────────────────────────────────────────────────
-function openEntry(entry) {
+async function openEntry(entry) {
   // Bump loadedAt in recent
   localStorage.setItem(RECENT_KEY, JSON.stringify(
     getRecent().map(r => r.cacheId === entry.cacheId ? { ...r, loadedAt: Date.now() } : r)
   ));
-  window.location.href =
-    `/viewer/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`;
+
+  // Check if frames are still in Redis cache
+  try {
+    const statusResp = await fetch(`/api/status/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`);
+    const status = await statusResp.json();
+    if (status.status === "ready") {
+      window.location.href = `/viewer/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`;
+      return;
+    }
+  } catch {}
+
+  // Cache expired — re-trigger download with stored instance IDs
+  try {
+    const loadResp = await fetch(`/api/load/${entry.studyId}/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrfToken() },
+      body: JSON.stringify({
+        instance_ids: entry.instanceIds || [],
+        swapped:      entry.swapped     || false,
+      }),
+    });
+    const data = await loadResp.json();
+    if (data.error) throw new Error(data.error);
+    const cacheId = data.cache_id || entry.cacheId;
+    const base = `/viewer/${entry.studyId}/?cache_id=${encodeURIComponent(cacheId)}`;
+    window.location.href = data.status === "ready" ? base : `${base}&job_id=${data.job_id}`;
+  } catch (e) {
+    // Fallback — let the viewer show an error
+    window.location.href = `/viewer/${entry.studyId}/?cache_id=${encodeURIComponent(entry.cacheId)}`;
+  }
 }
 
 function revealInSearch(entry) {
@@ -226,6 +257,7 @@ let selectedPatient   = "";
 let selectedDate      = "";
 let selectedDesc      = "";
 let pendingAutoSelect = null;
+let swappedPlanes     = false;
 
 // ── Elements ──────────────────────────────────────────────────────────────
 const searchInput    = document.getElementById("search-input");
@@ -238,12 +270,14 @@ const prevTrans      = document.getElementById("prev-trans");
 const prevSag        = document.getElementById("prev-sag");
 const previewInfo    = document.getElementById("preview-info");
 const launchBtn      = document.getElementById("launch-btn");
+const swapBtn        = document.getElementById("swap-btn");
 
 // ── Events ────────────────────────────────────────────────────────────────
 searchBtn.addEventListener("click", doSearch);
 searchInput.addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
 launchBtn.addEventListener("click", launchViewer);
 selectAllBtn.addEventListener("click", selectAll);
+swapBtn.addEventListener("click", swapPreviews);
 
 renderBookmarks();
 renderRecent();
@@ -377,6 +411,9 @@ function toggleRecording(rowEl, allInstances, studyId, patient, date) {
 
 // ── Preview ───────────────────────────────────────────────────────────────
 function loadPreview(studyId, patient, date, instances) {
+  swappedPlanes = false;
+  swapBtn.disabled = false;
+  swapBtn.classList.remove("swapped");
   prevTrans.innerHTML = '<span class="thumb-loading">⏳</span>';
   prevSag.innerHTML   = '<span class="thumb-loading">⏳</span>';
   const total = instances.reduce((s, i) => s + parseInt(i.n_frames || 0), 0);
@@ -395,7 +432,19 @@ function loadPreview(studyId, patient, date, instances) {
   imgSag.src = `/api/preview/${studyId}/sag/?t=${Date.now()}`;
 }
 
+function swapPreviews() {
+  swappedPlanes = !swappedPlanes;
+  swapBtn.classList.toggle("swapped", swappedPlanes);
+  // Visually swap the contents of the two boxes
+  const tmp = prevTrans.innerHTML;
+  prevTrans.innerHTML = prevSag.innerHTML;
+  prevSag.innerHTML   = tmp;
+}
+
 function clearPreview() {
+  swappedPlanes = false;
+  swapBtn.disabled = true;
+  swapBtn.classList.remove("swapped");
   prevTrans.textContent = "—"; prevSag.textContent = "—"; previewInfo.innerHTML = "";
 }
 
@@ -407,7 +456,7 @@ async function launchViewer() {
     const resp = await fetch(`/api/load/${selectedStudyId}/`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrfToken() },
-      body: JSON.stringify({ instance_ids: selectedInstances.map(i => i.id) }),
+      body: JSON.stringify({ instance_ids: selectedInstances.map(i => i.id), swapped: swappedPlanes }),
     });
     const data = await resp.json();
     if (data.error) {
@@ -415,7 +464,7 @@ async function launchViewer() {
       launchBtn.disabled = false; launchBtn.textContent = "Open in 3D Viewer →"; return;
     }
     const cacheId = data.cache_id;
-    saveRecent(selectedStudyId, cacheId, selectedPatient, selectedDate, selectedDesc, selectedInstances);
+    saveRecent(selectedStudyId, cacheId, selectedPatient, selectedDate, selectedDesc, selectedInstances, swappedPlanes);
     const base = `/viewer/${selectedStudyId}/?cache_id=${encodeURIComponent(cacheId)}`;
     window.location.href = data.status === "ready" ? base : `${base}&job_id=${data.job_id}`;
   } catch (e) {

@@ -3,8 +3,9 @@ from . import views
 
 urlpatterns = [
     # Pages
-    path("",                                views.search_page,     name="search"),
-    path("viewer/<str:study_id>/",          views.viewer_page,     name="viewer"),
+    path("",                                views.search_page,        name="search"),
+    path("viewer/<str:study_id>/",          views.viewer_page,        name="viewer"),
+    path("share/<str:study_id>/",           views.shared_viewer_page, name="viewer_shared"),
 
     # API
     path("api/search/",                     views.api_search,          name="api_search"),

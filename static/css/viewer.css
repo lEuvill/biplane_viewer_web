@@ -222,8 +222,27 @@ button:disabled  { opacity: 0.4; cursor: default; }
 .li-frames  { color: var(--accent); font-size: 10px; }
 .li-inst    { color: #555; font-size: 10px; }
 
-.preview-row { display: flex; gap: 14px; }
+.preview-row { display: flex; gap: 8px; align-items: center; }
 .thumb-col   { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.preview-swap-col { display: flex; flex-direction: column; align-items: center; }
+.swap-btn {
+  background: rgba(20,20,20,0.8);
+  border: 1px solid #2a2a2a;
+  color: #555;
+  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  padding: 0;
+}
+.swap-btn:hover:not(:disabled) { background: #1e1e1e; color: #aaa; border-color: #3a3a3a; }
+.swap-btn:disabled { opacity: 0.3; cursor: default; }
+.swap-btn.swapped { color: var(--accent); border-color: #1a3a44; background: #0d2028; }
 .thumb-box {
   width: 160px; height: 160px;
   background: #111;
@@ -356,6 +375,14 @@ button:disabled  { opacity: 0.4; cursor: default; }
 .viewer-layout {
   display: flex;
   height: 100%;
+}
+/* Shared/display-only mode — no panel, canvas fills full width */
+.viewer-layout--shared .viewer-canvas-wrap {
+  width: 100%;
+}
+/* Push ViewCube down to clear the extra shared controls bar */
+.viewer-layout--shared #viewcube-canvas {
+  top: 100px; /* 36px header + 28px frame bar + 28px shared bar + 8px gap */
 }
 
 /* ── Left panel ─────────────────────────────────────────── */
@@ -508,20 +535,45 @@ input[type=range] {
 .canvas-header {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 32px;
-  background: rgba(9,9,9,0.75);
-  border-bottom: 1px solid #1a1a1a;
+  height: 36px;
+  background: rgba(9,9,9,0.82);
+  border-bottom: 1px solid #1c1c1c;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
+  padding: 0 12px;
   pointer-events: none;
   z-index: 10;
+  gap: 12px;
 }
 #hdr-frame {
-  color: #3a3a3a;
+  color: #484848;
   font-size: 11px;
+  min-width: 90px;
 }
+.hdr-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: auto;
+}
+.hdr-btn {
+  background: rgba(30,30,30,0.8);
+  border: 1px solid #2a2a2a;
+  color: #aaa;
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.12s, color 0.12s;
+}
+.hdr-btn:hover { background: #2e2e2e; color: #e8e8e8; }
+.hdr-play-btn  { min-width: 70px; justify-content: center; }
+.hdr-play-btn.active { background: #1a2a1a; color: #4dff80; border-color: #2a4a2a; }
 .mode-badge {
   background: #1a0808;
   color: var(--red);
@@ -531,6 +583,92 @@ input[type=range] {
   border: 1px solid #3a1010;
   border-radius: 3px;
   padding: 2px 7px;
+  min-width: 56px;
+  text-align: center;
+}
+
+/* Frame slider bar below canvas header */
+.canvas-frame-bar {
+  position: absolute;
+  top: 36px; left: 0; right: 0;
+  height: 28px;
+  background: rgba(9,9,9,0.65);
+  border-bottom: 1px solid #181818;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 8px;
+  z-index: 10;
+  pointer-events: auto;
+}
+.canvas-frame-bar input[type=range] {
+  flex: 1;
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 14px;
+}
+.canvas-frame-bar .sl-val {
+  width: 24px;
+  text-align: right;
+  font-size: 11px;
+  color: #555;
+  flex-shrink: 0;
+}
+
+/* Shared viewer controls bar (display mode + FPS) */
+.canvas-shared-bar {
+  position: absolute;
+  top: 64px; /* 36px header + 28px frame bar */
+  left: 0; right: 0;
+  height: 28px;
+  background: rgba(9,9,9,0.65);
+  border-bottom: 1px solid #181818;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 16px;
+  z-index: 10;
+  pointer-events: auto;
+}
+.shared-bar-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.shared-bar-label {
+  color: #444;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.shared-radio {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #aaa;
+  cursor: pointer;
+}
+.canvas-shared-bar input[type=range] {
+  accent-color: var(--accent);
+  cursor: pointer;
+  height: 14px;
+}
+
+/* ViewCube */
+#viewcube-canvas {
+  position: absolute;
+  top: 72px;   /* 36px header + 28px frame bar + 8px gap */
+  right: 8px;
+  width: 110px;
+  height: 110px;
+  z-index: 10;
+  border-radius: 50%;   /* circular crop matches the orbit ring */
+  border: 1px solid #182838;
+  pointer-events: auto;
+  background: transparent;
 }
 
 /* ── Loading overlay ────────────────────────────────────── */

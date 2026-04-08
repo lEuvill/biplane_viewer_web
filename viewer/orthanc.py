@@ -137,7 +137,7 @@ def _download_instance_bytes(inst_id: str, cancel_flag=None, chunk_cb=None) -> b
 
 
 def load_frames_from_orthanc(instances, progress_cb=None, download_cb=None,
-                              cancel_flag=None) -> tuple:
+                              cancel_flag=None, swapped=False) -> tuple:
     """
     Download all instances then decode all frames in parallel.
     Returns (trans_frames, sag_frames, cursor_fracs).
@@ -183,7 +183,7 @@ def load_frames_from_orthanc(instances, progress_cb=None, download_cb=None,
         n  = int(getattr(ds, "NumberOfFrames", 1))
         r, c = int(ds.Rows), int(ds.Columns)
         for fb in generate_pixel_data_frame(ds.PixelData, n):
-            all_jobs.append((fb, r, c))
+            all_jobs.append((fb, r, c, swapped))
 
     total = len(all_jobs)
 

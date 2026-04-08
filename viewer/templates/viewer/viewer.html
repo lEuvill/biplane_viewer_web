@@ -33,16 +33,6 @@
       </div>
     </div>
 
-    <!-- Frame -->
-    <div class="panel-section">
-      <div class="section-title">FRAME</div>
-      <div class="slider-row">
-        <span class="sl-label">Frame</span>
-        <input type="range" id="frame-slider" min="0" max="{{ n_frames|add:'-1' }}" value="0" step="1">
-        <span class="sl-val" id="frame-val">1</span>
-      </div>
-    </div>
-
     <!-- Sagittal -->
     <div class="panel-section">
       <div class="section-title">SAGITTAL</div>
@@ -111,12 +101,6 @@
       </div>
     </div>
 
-    <!-- Playback -->
-    <div class="panel-section">
-      <div class="section-title">PLAYBACK</div>
-      <button id="play-btn" class="play-btn">&#9654;  Play</button>
-    </div>
-
   </div><!-- /panel -->
 
   <!-- ── Canvas area ────────────────────────────────────── -->
@@ -126,8 +110,22 @@
     <!-- Header overlay (top of canvas) -->
     <div class="canvas-header">
       <span id="hdr-frame">Frame 1 / {{ n_frames }}</span>
+      <div class="hdr-controls">
+        <button id="prev-btn" class="hdr-btn" title="Previous frame">&#9664;</button>
+        <button id="play-btn" class="hdr-btn hdr-play-btn">&#9654;&#160;&#160;Play</button>
+        <button id="next-btn" class="hdr-btn" title="Next frame">&#9654;</button>
+      </div>
       <span id="hdr-mode" class="mode-badge">STACK</span>
     </div>
+
+    <!-- Frame slider bar -->
+    <div class="canvas-frame-bar">
+      <input type="range" id="frame-slider" min="0" max="{{ n_frames|add:'-1' }}" value="0" step="1">
+      <span class="sl-val" id="frame-val">1</span>
+    </div>
+
+    <!-- ViewCube -->
+    <canvas id="viewcube-canvas"></canvas>
 
     <!-- Loading overlay -->
     <div id="loading-overlay" class="loading-overlay">

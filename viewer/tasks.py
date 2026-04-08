@@ -20,7 +20,7 @@ def _push(job_id: str, msg: dict):
 
 
 @shared_task(bind=True)
-def load_study_task(self, study_id: str, instance_ids: list = None, cache_id: str = None):
+def load_study_task(self, study_id: str, instance_ids: list = None, cache_id: str = None, swapped: bool = False):
     """
     Full pipeline for one Orthanc study:
       1. Find biplane instances (all, or only selected instance_ids)
@@ -54,6 +54,7 @@ def load_study_task(self, study_id: str, instance_ids: list = None, cache_id: st
             instances,
             progress_cb=on_progress,
             download_cb=on_download,
+            swapped=swapped,
         )
 
         _push(job_id, {"phase": "storing", "msg": "Storing frames…"})

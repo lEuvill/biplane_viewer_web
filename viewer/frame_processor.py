@@ -17,12 +17,13 @@ def decode_and_process(args):
     """
     Decode one JPEG-Lossless compressed DICOM frame.
 
-    args = (frame_bytes, rows, cols)
+    args = (frame_bytes, rows, cols, swapped)
+    swapped=True flips which half is treated as transverse vs sagittal.
     Returns (trans_rgba bytes, sag_rgba bytes, cursor_frac float)
     where each rgba bytes is a PNG-encoded 300×300 RGBA image
     (dark pixels have alpha=0 for Three.js transparency).
     """
-    frame_bytes, rows, cols = args
+    frame_bytes, rows, cols, swapped = args
 
     arr = pylibjpeg.decode(frame_bytes)
     if arr.ndim == 2:
@@ -30,8 +31,11 @@ def decode_and_process(args):
     arr = arr.reshape(rows, cols, -1).astype(np.uint8)
     bgr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
 
-    mid      = bgr.shape[0] // 2
-    sag_half = bgr[mid:]
+    mid = bgr.shape[0] // 2
+    top_half = bgr[:mid]
+    bot_half = bgr[mid:]
+    trans_half = bot_half if swapped else top_half
+    sag_half   = top_half if swapped else bot_half
 
     # Cursor detection
     b = sag_half[:, :, 0].astype(np.int32)
@@ -41,7 +45,7 @@ def decode_and_process(args):
     best_x   = int(col_cnts.argmax())
     frac     = best_x / sag_half.shape[1] if sag_half.shape[1] > 0 else 0.5
 
-    trans_gray = cv2.resize(cv2.cvtColor(bgr[:mid], cv2.COLOR_BGR2GRAY),
+    trans_gray = cv2.resize(cv2.cvtColor(trans_half, cv2.COLOR_BGR2GRAY),
                             (PROC_W, PROC_H), interpolation=cv2.INTER_AREA)
     sag_gray   = cv2.resize(cv2.cvtColor(sag_half, cv2.COLOR_BGR2GRAY),
                             (PROC_W, PROC_H), interpolation=cv2.INTER_AREA)

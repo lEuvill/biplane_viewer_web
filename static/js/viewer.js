@@ -47,11 +47,15 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
+// ViewCube render hook — filled in after applyPreset is defined
+let renderViewCube = () => {};
+
 // Render loop
 (function animate() {
   requestAnimationFrame(animate);
   controls.update();
   renderer.render(scene, camera);
+  renderViewCube();
 })();
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -236,6 +240,284 @@ function applyPreset(name) {
   controls.update();
 }
 
+// Snap camera so it looks FROM the direction of a clicked corner/edge.
+// localPos is the cube-local position of the corner/edge mesh (e.g. [1,-1,-1]).
+// The corner that faces you in the ViewCube is the one the camera should move TOWARD,
+// so it stays facing you isometrically → camera at center + dir * dist.
+function applyViewDir(localPos) {
+  const dir  = localPos.clone().normalize();
+  const dist = camera.position.distanceTo(controls.target);
+  // Move camera to the same side as the visible corner, looking back at center
+  camera.position.set(cx + dir.x * dist, cy + dir.y * dist, cz + dir.z * dist);
+  // Up: if looking steeply down/up (|Y| > 0.8) use -Z to avoid gimbal flip; else +Y
+  camera.up.set(0, Math.abs(dir.y) > 0.8 ? 0 : 1, Math.abs(dir.y) > 0.8 ? -1 : 0);
+  controls.target.set(cx, cy, cz);
+  controls.up0.copy(camera.up);
+  controls.update();
+}
+
+// ── ViewCube ──────────────────────────────────────────────────────────────────
+{
+  // Canvas is 110 px; ortho frustum ±2.4 so the orbit ring fits around the cube
+  const VC_SIZE    = 110;
+  const vcCanvas   = document.getElementById("viewcube-canvas");
+  const vcRenderer = new THREE.WebGLRenderer({ canvas: vcCanvas, alpha: true, antialias: true });
+  vcRenderer.setPixelRatio(window.devicePixelRatio);
+  vcRenderer.setSize(VC_SIZE, VC_SIZE);
+  vcRenderer.setClearColor(0x000000, 0);
+
+  const vcScene = new THREE.Scene();
+  // Frustum wide enough to show ring (radius 1.9) with a small margin
+  const vcCam   = new THREE.OrthographicCamera(-2.4, 2.4, 2.4, -2.4, 0.1, 10);
+  vcCam.position.set(0, 0, 5);
+
+  vcScene.add(new THREE.AmbientLight(0xffffff, 0.50));
+  const vcDir = new THREE.DirectionalLight(0xffffff, 0.80);
+  vcDir.position.set(2, 3, 4);
+  vcScene.add(vcDir);
+
+  // ── Face config ─────────────────────────────────────────────────────────────
+  // BoxGeometry material order: +X, -X, +Y, -Y, +Z, -Z
+  // When camera inverts its quaternion onto the cube:
+  //   transverse (cam looks +Z) → +Z face (FRONT) visible
+  //   sagittal_v (cam looks +X) → +X face (RIGHT) visible
+  //   top        (cam looks +Y) → +Y face (TOP)   visible
+  const FACE_CFG = [
+    { label: "RIGHT",  bg: "#0e1a28", fg: "#4a88bb", preset: "sagittal_v" },
+    { label: "LEFT",   bg: "#0e1a28", fg: "#2a4a66", preset: null         },
+    { label: "TOP",    bg: "#0d2010", fg: "#4aa04a", preset: "top"        },
+    { label: "BOT",    bg: "#0e0e0e", fg: "#282828", preset: null         },
+    { label: "FRONT",  bg: "#071520", fg: "#00b4d8", preset: "transverse" },
+    { label: "BACK",   bg: "#0e0e0e", fg: "#282828", preset: null         },
+  ];
+
+  function makeFaceTex(cfg, hover) {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = hover ? "#1a2d42" : cfg.bg;
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.strokeStyle = hover ? "#4a80bb" : "#202020"; ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, 124, 124);
+    ctx.fillStyle = hover ? "#ffffff" : cfg.fg;
+    ctx.font = "bold 18px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(cfg.label, 64, 64);
+    return new THREE.CanvasTexture(c);
+  }
+
+  const vcMats = FACE_CFG.map(cfg => {
+    const m = new THREE.MeshLambertMaterial({ map: makeFaceTex(cfg, false), transparent: true, opacity: 0.93 });
+    m._n = m.map;
+    m._h = makeFaceTex(cfg, true);
+    return m;
+  });
+
+  const vcCube = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), vcMats);
+  vcScene.add(vcCube);
+
+  // Corner sphere indicators (8 corners) — tiny spheres for visual grab targets
+  const cornDirs = [-1, 1];
+  const vcCornerMat = new THREE.MeshBasicMaterial({ color: 0x224466, transparent: true, opacity: 0.75 });
+  const vcCornerMatH = new THREE.MeshBasicMaterial({ color: 0x66aaff, transparent: true, opacity: 1.0 });
+  const vcCorners = [];
+  for (const sx of cornDirs) for (const sy of cornDirs) for (const sz of cornDirs) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), vcCornerMat);
+    m.position.set(sx, sy, sz);
+    m._isCorner = true;
+    vcCube.add(m);   // child of cube — auto-rotates with it
+    vcCorners.push(m);
+  }
+
+  // Edge cylinders — 12 edges for visual grab targets
+  const vcEdgeMat  = new THREE.MeshBasicMaterial({ color: 0x1a3050, transparent: true, opacity: 0.70 });
+  const vcEdgeMatH = new THREE.MeshBasicMaterial({ color: 0x4488cc, transparent: true, opacity: 1.00 });
+  const EDGE_DEFS = [
+    // along X (4 edges)
+    [[ 0,  1,  1], [1,0,0]], [[ 0, -1,  1], [1,0,0]],
+    [[ 0,  1, -1], [1,0,0]], [[ 0, -1, -1], [1,0,0]],
+    // along Y (4 edges)
+    [[ 1,  0,  1], [0,1,0]], [[-1,  0,  1], [0,1,0]],
+    [[ 1,  0, -1], [0,1,0]], [[-1,  0, -1], [0,1,0]],
+    // along Z (4 edges)
+    [[ 1,  1,  0], [0,0,1]], [[-1,  1,  0], [0,0,1]],
+    [[ 1, -1,  0], [0,0,1]], [[-1, -1,  0], [0,0,1]],
+  ];
+  const vcEdges = [];
+  for (const [[px,py,pz],[ax,ay,az]] of EDGE_DEFS) {
+    const geo = new THREE.CylinderGeometry(0.07, 0.07, 2, 6);
+    const m   = new THREE.Mesh(geo, vcEdgeMat);
+    m.position.set(px, py, pz);
+    if (ax) m.rotation.z = Math.PI / 2;
+    if (az) m.rotation.x = Math.PI / 2;
+    m._isEdge = true;
+    vcCube.add(m);   // child of cube — auto-rotates with it, preserving local axis alignment
+    vcEdges.push(m);
+  }
+
+  // Orbit ring — flat torus in XY plane (appears as circle from vcCam)
+  const vcRingMatN = new THREE.MeshBasicMaterial({ color: 0x183050, transparent: true, opacity: 0.65, side: THREE.DoubleSide });
+  const vcRingMatH = new THREE.MeshBasicMaterial({ color: 0x3a88cc, transparent: true, opacity: 0.92, side: THREE.DoubleSide });
+  const vcRing = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.09, 10, 56), vcRingMatN);
+  vcScene.add(vcRing);
+
+  // ── Hover state ─────────────────────────────────────────────────────────────
+  let vcFaceHov = -1, vcRingHov = false, vcCornerHov = null, vcEdgeHov = null;
+
+  function vcClearHover() {
+    if (vcFaceHov >= 0) { vcMats[vcFaceHov].map = vcMats[vcFaceHov]._n; vcMats[vcFaceHov].needsUpdate = true; }
+    vcFaceHov = -1;
+    if (vcRingHov) vcRing.material = vcRingMatN; vcRingHov = false;
+    if (vcCornerHov) vcCornerHov.material = vcCornerMat; vcCornerHov = null;
+    if (vcEdgeHov)   vcEdgeHov.material   = vcEdgeMat;   vcEdgeHov   = null;
+  }
+
+  function vcDoHover(faceIdx, ringH, cornerMesh, edgeMesh) {
+    // Reset all
+    if (vcFaceHov >= 0   && vcFaceHov !== faceIdx) { vcMats[vcFaceHov].map = vcMats[vcFaceHov]._n; vcMats[vcFaceHov].needsUpdate = true; }
+    if (vcRingHov        && !ringH)                  vcRing.material = vcRingMatN;
+    if (vcCornerHov      && vcCornerHov !== cornerMesh) vcCornerHov.material = vcCornerMat;
+    if (vcEdgeHov        && vcEdgeHov   !== edgeMesh)   vcEdgeHov.material   = vcEdgeMat;
+    // Apply new
+    vcFaceHov   = faceIdx;   if (faceIdx >= 0)    { vcMats[faceIdx].map = vcMats[faceIdx]._h; vcMats[faceIdx].needsUpdate = true; }
+    vcRingHov   = ringH;     if (ringH)             vcRing.material   = vcRingMatH;
+    vcCornerHov = cornerMesh; if (cornerMesh)       cornerMesh.material = vcCornerMatH;
+    vcEdgeHov   = edgeMesh;   if (edgeMesh)         edgeMesh.material   = vcEdgeMatH;
+  }
+
+  // ── Raycasting ───────────────────────────────────────────────────────────────
+  const vcRay = new THREE.Raycaster();
+  vcRay.params.Line = { threshold: 0.1 };
+
+  function vcCast(cx, cy) {
+    const rect = vcCanvas.getBoundingClientRect();
+    vcRay.setFromCamera(
+      new THREE.Vector2((cx - rect.left) / VC_SIZE * 2 - 1, -(cy - rect.top) / VC_SIZE * 2 + 1),
+      vcCam
+    );
+    const cubeHits   = vcRay.intersectObject(vcCube);
+    const ringHits   = vcRay.intersectObject(vcRing);
+    const cornerHits = vcRay.intersectObjects(vcCorners);
+    const edgeHits   = vcRay.intersectObjects(vcEdges);
+    return { cubeHits, ringHits, cornerHits, edgeHits };
+  }
+
+  function localPt(hit) { return vcCube.worldToLocal(hit.point.clone()); }
+  function faceIdx(hit) { return Math.floor(hit.faceIndex / 2); }
+
+  // ── Drag state ───────────────────────────────────────────────────────────────
+  let vcDrag = null;   // null | "cube" | "ring"
+  let vcDragMoved = false, vcLX = 0, vcLY = 0;
+
+  vcCanvas.addEventListener("mousedown", e => {
+    const { cubeHits, ringHits, cornerHits, edgeHits } = vcCast(e.clientX, e.clientY);
+    if (!cubeHits.length && !ringHits.length && !cornerHits.length && !edgeHits.length) return;
+    vcDrag = (ringHits.length && (!cubeHits.length || ringHits[0].distance < cubeHits[0].distance))
+             ? "ring" : "cube";
+    vcDragMoved = false;
+    vcLX = e.clientX; vcLY = e.clientY;
+    controls.enabled = false;
+    e.preventDefault(); e.stopPropagation();
+  });
+
+  function vcRotateCamera(dx, dy, yAxisOnly) {
+    const sens   = 0.010;
+    const offset = camera.position.clone().sub(controls.target);
+    // Horizontal drag → orbit around world Y
+    const qY = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -dx * sens);
+    offset.applyQuaternion(qY);
+    camera.up.applyQuaternion(qY).normalize();
+    if (!yAxisOnly) {
+      // Vertical drag → orbit around camera's right axis
+      const right = new THREE.Vector3()
+        .crossVectors(camera.getWorldDirection(new THREE.Vector3()), camera.up)
+        .normalize();
+      const qX = new THREE.Quaternion().setFromAxisAngle(right, -dy * sens);
+      offset.applyQuaternion(qX);
+      camera.up.applyQuaternion(qX).normalize();
+    }
+    camera.position.copy(controls.target).add(offset);
+    controls.up0.copy(camera.up);
+    controls.update();
+  }
+
+  window.addEventListener("mousemove", e => {
+    if (!vcDrag) return;
+    const dx = e.clientX - vcLX, dy = e.clientY - vcLY;
+    vcLX = e.clientX; vcLY = e.clientY;
+    if (Math.abs(dx) + Math.abs(dy) > 1) vcDragMoved = true;
+    vcRotateCamera(dx, dy, vcDrag === "ring");
+  });
+
+  window.addEventListener("mouseup", e => {
+    if (!vcDrag) return;
+    controls.enabled = true;
+    if (!vcDragMoved) {
+      // Treat as a click — determine what was hit
+      const { cubeHits, cornerHits, edgeHits } = vcCast(e.clientX, e.clientY);
+      if (cornerHits.length) {
+        // Corner local position = [±1, ±1, ±1] — normalise to get exact 3/4 view direction
+        applyViewDir(cornerHits[0].object.position);
+      } else if (edgeHits.length) {
+        // Edge local position has one zero component, e.g. [0,1,1] or [1,0,-1]
+        // Normalising gives the bisecting view direction for that edge
+        applyViewDir(edgeHits[0].object.position);
+      } else if (cubeHits.length) {
+        const lp = localPt(cubeHits[0]);
+        const hi = [Math.abs(lp.x), Math.abs(lp.y), Math.abs(lp.z)].filter(v => v > 0.60).length;
+        if (hi >= 2) {
+          // Click landed on the face but very close to an edge/corner — use surface point
+          applyViewDir(lp);
+        } else {
+          const p = FACE_CFG[faceIdx(cubeHits[0])].preset;
+          if (p) applyPreset(p);
+        }
+      }
+    }
+    vcDrag = null; vcDragMoved = false;
+  });
+
+  // ── Hover (mousemove on canvas) ──────────────────────────────────────────────
+  vcCanvas.addEventListener("mousemove", e => {
+    if (vcDrag) { vcCanvas.style.cursor = "grabbing"; return; }
+    const { cubeHits, ringHits, cornerHits, edgeHits } = vcCast(e.clientX, e.clientY);
+
+    // Priority: corner > edge > ring > face
+    if (cornerHits.length) {
+      vcDoHover(-1, false, cornerHits[0].object, null);
+      vcCanvas.style.cursor = "pointer";
+    } else if (edgeHits.length && (!cubeHits.length || edgeHits[0].distance < cubeHits[0].distance + 0.05)) {
+      vcDoHover(-1, false, null, edgeHits[0].object);
+      vcCanvas.style.cursor = "pointer";
+    } else if (ringHits.length && (!cubeHits.length || ringHits[0].distance < cubeHits[0].distance)) {
+      vcDoHover(-1, true, null, null);
+      vcCanvas.style.cursor = "grab";
+    } else if (cubeHits.length) {
+      const fi = faceIdx(cubeHits[0]);
+      const lp = localPt(cubeHits[0]);
+      const hi = [Math.abs(lp.x), Math.abs(lp.y), Math.abs(lp.z)].filter(v => v > 0.60).length;
+      vcDoHover(hi >= 2 ? -1 : fi, false, null, null);
+      vcCanvas.style.cursor = (hi >= 2 || FACE_CFG[fi].preset) ? "pointer" : "grab";
+    } else {
+      vcClearHover();
+      vcCanvas.style.cursor = "default";
+    }
+  });
+
+  vcCanvas.addEventListener("mouseleave", () => {
+    if (!vcDrag) vcClearHover();
+    vcCanvas.style.cursor = "default";
+  });
+
+  // ── Per-frame render ─────────────────────────────────────────────────────────
+  renderViewCube = function () {
+    // Cube mirrors main camera orientation (inverse quaternion).
+    // Corners and edges are children of vcCube so they auto-follow it —
+    // no manual quaternion sync needed.
+    vcCube.quaternion.copy(camera.quaternion).invert();
+    vcRenderer.render(vcScene, vcCam);
+  };
+}
+
 // ── Camera slots (persisted in localStorage) ──────────────────────────────────
 const SLOTS_KEY = `biplane_cam_slots_${studyId}`;
 
@@ -394,9 +676,14 @@ async function exportVideo(fps) {
 }
 
 // ── ROI drawing ───────────────────────────────────────────────────────────────
-const roiModal  = document.getElementById("roi-modal");
-const roiCanvas = document.getElementById("roi-canvas");
-const roiCtx    = roiCanvas.getContext("2d");
+let roiModal  = null;
+let roiCanvas = null;
+let roiCtx    = null;
+if (!VIEWER_CONFIG.shared) {
+roiModal  = document.getElementById("roi-modal");
+roiCanvas = document.getElementById("roi-canvas");
+roiCtx    = roiCanvas.getContext("2d");
+}
 let roiPts      = [];
 let roiHover    = null;
 
@@ -507,6 +794,7 @@ function _drawRoiVectors() {
   });
 }
 
+if (!VIEWER_CONFIG.shared) {
 roiCanvas.addEventListener("click", e => {
   const r = roiCanvas.getBoundingClientRect();
   roiPts.push({ x: e.clientX - r.left, y: e.clientY - r.top });
@@ -544,6 +832,7 @@ document.getElementById("roi-apply").addEventListener("click", () => {
   applyRoiMask();
   roiModal.style.display = "none";
 });
+} // end !shared (ROI event listeners)
 
 function applyRoiMask() {
   // Build 300×300 mask canvas (white inside polygon, black outside)
@@ -568,12 +857,14 @@ function applyRoiMask() {
   redraw();
 }
 
+if (!VIEWER_CONFIG.shared) {
 document.getElementById("roi-draw-btn").addEventListener("click",  openRoiModalFull);
 document.getElementById("roi-clear-btn").addEventListener("click", () => {
   roiMask = null;
   texCache.clear();
   redraw();
 });
+} // end !shared (ROI buttons)
 
 // ── Panel controls wiring ────────────────────────────────────────────────────
 function updateFrameUI() {
@@ -591,6 +882,7 @@ function setMode(newMode) {
 }
 
 // Opacity sliders
+if (!VIEWER_CONFIG.shared) {
 document.getElementById("trans-opacity-slider").addEventListener("input", function() {
   transOpacity = this.value / 100;
   document.getElementById("trans-opacity-val").textContent = transOpacity.toFixed(2);
@@ -611,6 +903,7 @@ document.getElementById("sag-color-picker").addEventListener("input", function()
   sagColor = new THREE.Color(this.value);
   buildSagittal();
 });
+} // end !shared
 
 // Frame slider
 const frameSlider = document.getElementById("frame-slider");
@@ -622,14 +915,24 @@ frameSlider.addEventListener("input", () => {
   buildSagittal();
 });
 
-// Mode radios
+// Mode radios (present in both full and shared templates)
 document.querySelectorAll("input[name=mode]").forEach(r =>
   r.addEventListener("change", () => setMode(r.value))
 );
 
-// Sagittal Z offset
-const sagZSlider = document.getElementById("sag-z-slider");
-sagZSlider.value  = sagZOffset;
+// FPS slider (present in both full and shared templates)
+const fpsSlider = document.getElementById("fps-slider");
+fpsSlider.addEventListener("input", () => {
+  document.getElementById("fps-val").textContent = fpsSlider.value;
+  if (playTimer) startPlay();  // restart with new fps
+});
+
+// Sagittal + Camera + Export (panel only)
+let sagZSlider = null, sagYSlider = null, sagClipSlider = null;
+if (!VIEWER_CONFIG.shared) {
+
+sagZSlider = document.getElementById("sag-z-slider");
+sagZSlider.value = sagZOffset;
 document.getElementById("sag-z-val").textContent = sagZOffset;
 sagZSlider.addEventListener("input", () => {
   sagZOffset = parseInt(sagZSlider.value);
@@ -638,29 +941,25 @@ sagZSlider.addEventListener("input", () => {
   else buildSagittal();
 });
 
-// Sagittal Y depth
-const sagYSlider = document.getElementById("sag-y-slider");
+sagYSlider = document.getElementById("sag-y-slider");
 sagYSlider.addEventListener("input", () => {
   sagYCenter = parseInt(sagYSlider.value);
   document.getElementById("sag-y-val").textContent = sagYCenter;
   buildSagittal();
 });
 
-// Sagittal clip distance
-const sagClipSlider = document.getElementById("sag-clip-slider");
+sagClipSlider = document.getElementById("sag-clip-slider");
 sagClipSlider.addEventListener("input", () => {
   sagClipDist = parseInt(sagClipSlider.value);
   document.getElementById("sag-clip-val").textContent = sagClipDist;
   buildSagittal();
 });
 
-// Hide sagittal
 document.getElementById("hide-sag").addEventListener("change", e => {
   sagHidden = e.target.checked;
   if (sagMesh) sagMesh.visible = !sagHidden;
 });
 
-// Reset sagittal
 document.getElementById("sag-reset-btn").addEventListener("click", () => {
   sagYCenter  = 140;
   sagClipDist = SAG_Z;
@@ -669,31 +968,26 @@ document.getElementById("sag-reset-btn").addEventListener("click", () => {
   buildSagittal();
 });
 
-// Camera preset buttons
 document.querySelectorAll(".cam-btn").forEach(btn =>
   btn.addEventListener("click", () => applyPreset(btn.dataset.preset))
 );
 
-// FPS slider
-const fpsSlider = document.getElementById("fps-slider");
-fpsSlider.addEventListener("input", () => {
-  document.getElementById("fps-val").textContent = fpsSlider.value;
-  if (playTimer) startPlay();  // restart with new fps
-});
-
-// Export
 document.getElementById("export-btn").addEventListener("click", () =>
   exportVideo(parseInt(fpsSlider.value))
 );
 
+} // end !shared
+
 // Playback
 const playBtn = document.getElementById("play-btn");
+const prevBtn = document.getElementById("prev-btn");
+const nextBtn = document.getElementById("next-btn");
 
 function startPlay() {
   stopPlay();
   if (displayMode !== "single") setMode("single");
   const fps = parseInt(fpsSlider.value);
-  playBtn.textContent = "■  Stop";
+  playBtn.innerHTML = "&#9632;&#160;&#160;Stop";
   playBtn.classList.add("active");
   playTimer = setInterval(() => {
     currentFrame = (currentFrame + 1) % nFrames;
@@ -704,13 +998,29 @@ function startPlay() {
 }
 function stopPlay() {
   if (playTimer) { clearInterval(playTimer); playTimer = null; }
-  playBtn.textContent = "▶  Play";
+  playBtn.innerHTML = "&#9654;&#160;&#160;Play";
   playBtn.classList.remove("active");
 }
 
 playBtn.addEventListener("click", () => {
   if (playTimer) stopPlay();
   else           startPlay();
+});
+
+prevBtn.addEventListener("click", () => {
+  stopPlay();
+  currentFrame = (currentFrame - 1 + nFrames) % nFrames;
+  updateFrameUI();
+  if (displayMode === "stack") buildStack();
+  else { buildSingle(currentFrame); buildSagittal(); }
+});
+
+nextBtn.addEventListener("click", () => {
+  stopPlay();
+  currentFrame = (currentFrame + 1) % nFrames;
+  updateFrameUI();
+  if (displayMode === "stack") buildStack();
+  else { buildSingle(currentFrame); buildSagittal(); }
 });
 
 // ── Loading / WebSocket ────────────────────────────────────────────────────
@@ -728,7 +1038,7 @@ function setProgress(pct, label) {
 function onLoadComplete() {
   overlay.style.display = "none";
   applyPreset("perspective");
-  buildSlotsUI();
+  if (!VIEWER_CONFIG.shared) buildSlotsUI();
   buildStack();
   updateFrameUI();
 }
@@ -812,17 +1122,21 @@ function getCsrfToken() {
   return document.querySelector("meta[name=csrf-token]")?.content || "";
 }
 
-// ── Share button ─────────────────────────────────────────────────────────────
+// ── Share button (panel only) ─────────────────────────────────────────────────
+if (!VIEWER_CONFIG.shared) {
 document.getElementById("share-btn").addEventListener("click", () => {
-  const url = `${location.origin}/viewer/${studyId}/?cache_id=${encodeURIComponent(cacheId)}`;
+  const url = `${location.origin}/share/${studyId}/?cache_id=${encodeURIComponent(cacheId)}`;
   navigator.clipboard.writeText(url).then(() => {
     const confirm = document.getElementById("share-confirm");
     confirm.style.display = "block";
     setTimeout(() => { confirm.style.display = "none"; }, 2500);
   });
 });
+} // end !shared
 
 // ── Initial state ────────────────────────────────────────────────────────────
-sagZSlider.value = sagZOffset;
-document.getElementById("sag-z-val").textContent = sagZOffset;
-buildSlotsUI();
+if (!VIEWER_CONFIG.shared) {
+  sagZSlider.value = sagZOffset;
+  document.getElementById("sag-z-val").textContent = sagZOffset;
+  buildSlotsUI();
+}

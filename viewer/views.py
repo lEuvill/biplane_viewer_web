@@ -25,7 +25,8 @@ def search_page(request):
     return render(request, "viewer/search.html")
 
 
-def viewer_page(request, study_id):
+def _viewer_context(request, study_id):
+    """Shared logic for viewer_page and shared_viewer_page."""
     cache_id = request.GET.get("cache_id", study_id)
     meta     = get_meta(cache_id)
     job_id   = request.GET.get("job_id", "")
@@ -40,13 +41,24 @@ def viewer_page(request, study_id):
         except SharedStudy.DoesNotExist:
             pass   # unknown cache_id — viewer.js will redirect to search
 
-    return render(request, "viewer/viewer.html", {
+    return cache_id, job_id, {
         "study_id":    study_id,
         "cache_id":    cache_id,
         "n_frames":    meta["n_frames"]    if meta else 0,
         "cursor_frac": meta["cursor_frac"] if meta else 0.5,
         "job_id":      job_id,
-    })
+    }
+
+
+def viewer_page(request, study_id):
+    _, _, ctx = _viewer_context(request, study_id)
+    return render(request, "viewer/viewer.html", ctx)
+
+
+def shared_viewer_page(request, study_id):
+    """Display-only viewer — no control panel. Used for shared links."""
+    _, _, ctx = _viewer_context(request, study_id)
+    return render(request, "viewer/viewer_shared.html", ctx)
 
 
 # ── API ───────────────────────────────────────────────────────────────────────
@@ -80,13 +92,15 @@ def api_load_study(request, study_id):
     try:
         body         = json.loads(request.body or b"{}")
         instance_ids = body.get("instance_ids", [])   # list of Orthanc instance IDs
+        swapped      = bool(body.get("swapped", False))
 
-        # Build a cache key that includes selected instances so different
-        # selections are treated as separate loads
+        # Build a cache key that includes selected instances and swap state
+        # so different selections / swap choices are cached separately
         import hashlib
-        sel_key = hashlib.md5(
-            ",".join(sorted(instance_ids)).encode()
-        ).hexdigest()[:8] if instance_ids else "all"
+        key_src = ",".join(sorted(instance_ids))
+        if swapped:
+            key_src += ":swapped"
+        sel_key = hashlib.md5(key_src.encode()).hexdigest()[:8] if instance_ids else ("swapped" if swapped else "all")
         cache_id = f"{study_id}:{sel_key}"
 
         status = get_status(cache_id)
@@ -109,7 +123,7 @@ def api_load_study(request, study_id):
             defaults={"study_id": study_id, "instance_ids": instance_ids},
         )
 
-        task = load_study_task.delay(study_id, instance_ids, cache_id)
+        task = load_study_task.delay(study_id, instance_ids, cache_id, swapped=swapped)
         set_status(cache_id, "loading", task.id)
         return JsonResponse({"status": "loading", "job_id": task.id,
                              "cache_id": cache_id})
