@@ -144,9 +144,70 @@ button:disabled  { opacity: 0.4; cursor: default; }
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 24px 28px;
-  gap: 20px;
+  overflow: hidden;
+}
+
+/* ── Tab bar ────────────────────────────────────────────── */
+.right-tabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid #1c1c1c;
+  background: #0d0d0d;
+}
+.right-tab {
+  flex: 1;
+  padding: 10px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #404040;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.right-tab:hover  { color: #888; }
+.right-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-badge {
+  background: #1a3a44;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  line-height: 1.4;
+}
+
+/* ── Tab panels ─────────────────────────────────────────── */
+.right-tab-panels {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.right-tab-panel {
+  display: none;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px;
+  position: absolute;
+  inset: 0;
   overflow-y: auto;
+}
+.right-tab-panel::-webkit-scrollbar { width: 4px; }
+.right-tab-panel::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+.right-tab-panel.active { display: flex; }
+
+.tab-empty {
+  color: #333;
+  font-size: 11px;
+  text-align: center;
+  padding: 24px 0;
+  line-height: 1.8;
 }
 .page-heading { padding: 24px 20px 0; flex-shrink: 0; }
 .page-heading h1 { font-size: 17px; font-weight: 700; color: #f0f0f0; margin-bottom: 4px; }
@@ -158,8 +219,6 @@ button:disabled  { opacity: 0.4; cursor: default; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 0;
-  overflow: hidden;
 }
 .section-label {
   color: var(--red);
@@ -222,9 +281,9 @@ button:disabled  { opacity: 0.4; cursor: default; }
 .li-frames  { color: var(--accent); font-size: 10px; }
 .li-inst    { color: #555; font-size: 10px; }
 
-.preview-row { display: flex; gap: 8px; align-items: center; }
-.thumb-col   { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.preview-swap-col { display: flex; flex-direction: column; align-items: center; }
+.preview-row { display: flex; gap: 12px; align-items: center; justify-content: center; }
+.thumb-col   { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
+.preview-swap-col { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; }
 .swap-btn {
   background: rgba(20,20,20,0.8);
   border: 1px solid #2a2a2a;
@@ -244,31 +303,60 @@ button:disabled  { opacity: 0.4; cursor: default; }
 .swap-btn:disabled { opacity: 0.3; cursor: default; }
 .swap-btn.swapped { color: var(--accent); border-color: #1a3a44; background: #0d2028; }
 .thumb-box {
-  width: 160px; height: 160px;
+  width: 100%;
+  aspect-ratio: 1 / 1;
   background: #111;
   border: 1px solid #242424;
-  border-radius: 4px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #303030;
-  font-size: 20px;
+  font-size: 24px;
   overflow: hidden;
 }
 .thumb-box img { width: 100%; height: 100%; object-fit: cover; }
 .thumb-loading { color: #666; }
-.thumb-cap { color: #404040; font-size: 10px; }
+.thumb-cap { color: #555; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; }
 .preview-info {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   font-size: 11px;
   color: #888;
-  padding-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid #1a1a1a;
+  margin-top: 4px;
 }
 .preview-info div { display: flex; gap: 8px; }
 .info-label { color: #444; min-width: 52px; }
 /* ── Recent studies ─────────────────────────────────────── */
+/* Bookmark label grouping */
+.bm-entry-wrap { display: flex; flex-direction: column; }
+.bm-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: #444;
+  text-transform: uppercase;
+  padding: 10px 6px 3px;
+  cursor: text;
+  border-radius: 3px;
+  outline: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bm-label:hover { color: #666; }
+.bm-label.editing {
+  color: var(--accent);
+  background: #0d1f27;
+  border-radius: 3px;
+  padding: 2px 6px;
+  white-space: nowrap;
+  overflow: visible;
+}
+
 .recent-list { display: flex; flex-direction: column; gap: 4px; }
 .recent-row {
   display: flex;

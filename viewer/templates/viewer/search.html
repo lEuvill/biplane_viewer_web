@@ -48,37 +48,49 @@
   <!-- ── Right column ────────────────────────────── -->
   <div class="pacs-right">
 
-    <div class="pacs-section">
-      <div class="section-label">PREVIEW</div>
-      <div class="preview-row">
-        <div class="thumb-col">
-          <div id="prev-trans" class="thumb-box">—</div>
-          <div class="thumb-cap">Transverse</div>
+    <!-- Tab bar -->
+    <div class="right-tabs">
+      <button class="right-tab active" data-tab="preview">Preview</button>
+      <button class="right-tab" data-tab="bookmarks">Bookmarks <span id="bm-count" class="tab-badge" style="display:none"></span></button>
+      <button class="right-tab" data-tab="recent">Recent <span id="rc-count" class="tab-badge" style="display:none"></span></button>
+    </div>
+
+    <!-- Tab panels -->
+    <div class="right-tab-panels">
+
+      <!-- Preview panel -->
+      <div class="right-tab-panel active" id="tab-preview">
+        <div class="preview-row">
+          <div class="thumb-col">
+            <div id="prev-trans" class="thumb-box">—</div>
+            <div class="thumb-cap">Transverse</div>
+          </div>
+          <div class="preview-swap-col">
+            <button id="swap-btn" class="swap-btn" title="Swap planes" disabled>⇅</button>
+          </div>
+          <div class="thumb-col">
+            <div id="prev-sag" class="thumb-box">—</div>
+            <div class="thumb-cap">Sagittal</div>
+          </div>
         </div>
-        <div class="preview-swap-col">
-          <button id="swap-btn" class="swap-btn" title="Swap planes" disabled>⇅</button>
-        </div>
-        <div class="thumb-col">
-          <div id="prev-sag" class="thumb-box">—</div>
-          <div class="thumb-cap">Sagittal</div>
-        </div>
+        <div id="preview-info" class="preview-info"></div>
       </div>
-      <div id="preview-info" class="preview-info"></div>
-    </div>
 
-    <!-- Bookmarks -->
-    <div class="pacs-section" id="bookmarks-section" style="display:none">
-      <div class="section-label">BOOKMARKS</div>
-      <div id="bookmarks-list" class="recent-list"></div>
-    </div>
+      <!-- Bookmarks panel -->
+      <div class="right-tab-panel" id="tab-bookmarks">
+        <div id="bookmarks-list" class="recent-list"></div>
+        <div id="bm-empty" class="tab-empty">No bookmarks yet.<br>Click ★ on a recent study to bookmark it.</div>
+      </div>
 
-    <!-- Recent -->
-    <div class="pacs-section" id="recent-section" style="display:none">
-      <div class="section-label">RECENT</div>
-      <div id="recent-list" class="recent-list"></div>
-    </div>
+      <!-- Recent panel -->
+      <div class="right-tab-panel" id="tab-recent">
+        <div id="recent-list" class="recent-list"></div>
+        <div id="rc-empty" class="tab-empty">No recent studies yet.</div>
+      </div>
 
-    <!-- Launch button -->
+    </div><!-- /right-tab-panels -->
+
+    <!-- Launch button — always visible -->
     <div class="launch-area">
       <button id="launch-btn" class="launch-btn" disabled>
         Open in 3D Viewer &nbsp;→
@@ -122,12 +134,17 @@ function saveRecent(studyId, cacheId, patient, date, desc, instances, swapped = 
   localStorage.setItem(RECENT_KEY, JSON.stringify(list));
 }
 
+function _defaultLabel(entry) {
+  // Use cleaned patient name as default label
+  return (entry.patient || "Uncategorized").replace(/\^/g, " ").split(",")[0].trim() || "Uncategorized";
+}
+
 function toggleBookmark(entry) {
   let list = getBookmarks();
   if (isBookmarked(entry.cacheId)) {
     list = list.filter(b => b.cacheId !== entry.cacheId);
   } else {
-    list.unshift({ ...entry, bookmarkedAt: Date.now() });
+    list.unshift({ ...entry, label: _defaultLabel(entry), bookmarkedAt: Date.now() });
   }
   localStorage.setItem(BOOKMARK_KEY, JSON.stringify(list));
   renderBookmarks();
@@ -139,6 +156,17 @@ function removeBookmark(cacheId) {
     JSON.stringify(getBookmarks().filter(b => b.cacheId !== cacheId)));
   renderBookmarks();
   renderRecent();   // refresh star state in recent
+}
+
+function editBookmarkLabel(cacheId) {
+  const list = getBookmarks();
+  const entry = list.find(b => b.cacheId === cacheId);
+  if (!entry) return;
+  const newLabel = prompt("Edit label:", entry.label || _defaultLabel(entry));
+  if (newLabel === null) return;  // cancelled
+  entry.label = newLabel.trim() || _defaultLabel(entry);
+  localStorage.setItem(BOOKMARK_KEY, JSON.stringify(list));
+  renderBookmarks();
 }
 
 function removeFromRecent(cacheId) {
@@ -278,6 +306,16 @@ searchInput.addEventListener("keydown", e => { if (e.key === "Enter") doSearch()
 launchBtn.addEventListener("click", launchViewer);
 selectAllBtn.addEventListener("click", selectAll);
 swapBtn.addEventListener("click", swapPreviews);
+
+// ── Tab switching ─────────────────────────────────────────────────────────
+document.querySelectorAll(".right-tab").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".right-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".right-tab-panel").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById("tab-" + tab.dataset.tab).classList.add("active");
+  });
+});
 
 renderBookmarks();
 renderRecent();
@@ -515,6 +553,7 @@ function buildEntryRow(entry, ready, { isBookmark = false } = {}) {
       { sep: true },
     ];
     if (isBookmark) {
+      items.push({ label: "Edit label",      fn: () => editBookmarkLabel(entry.cacheId) });
       items.push({ label: "Remove bookmark", fn: () => removeBookmark(entry.cacheId), danger: true });
     } else {
       items.push({ label: bookmarked ? "Remove bookmark" : "Bookmark ★", fn: () => toggleBookmark(entry) });
@@ -530,11 +569,19 @@ function buildEntryRow(entry, ready, { isBookmark = false } = {}) {
 // ── Render recent ─────────────────────────────────────────────────────────
 async function renderRecent() {
   const list = getRecent().sort((a, b) => (b.loadedAt ?? 0) - (a.loadedAt ?? 0));
-  const section   = document.getElementById("recent-section");
   const container = document.getElementById("recent-list");
-  if (!list.length) { section.style.display = "none"; return; }
-  section.style.display = "";
+  const empty     = document.getElementById("rc-empty");
+  const badge     = document.getElementById("rc-count");
   container.innerHTML = "";
+
+  if (!list.length) {
+    empty.style.display = "";
+    badge.style.display = "none";
+    return;
+  }
+  empty.style.display = "none";
+  badge.textContent = list.length;
+  badge.style.display = "";
 
   const statuses = await Promise.all(list.map(async entry => {
     try {
@@ -550,12 +597,23 @@ async function renderRecent() {
 
 // ── Render bookmarks ──────────────────────────────────────────────────────
 async function renderBookmarks() {
-  const list = getBookmarks().sort((a, b) => (a.patient || "").localeCompare(b.patient || ""));
-  const section   = document.getElementById("bookmarks-section");
+  const list = getBookmarks()
+    .map(b => ({ ...b, label: b.label || _defaultLabel(b) }))
+    .sort((a, b) => a.label.localeCompare(b.label) || (a.patient || "").localeCompare(b.patient || ""));
+
   const container = document.getElementById("bookmarks-list");
-  if (!list.length) { section.style.display = "none"; return; }
-  section.style.display = "";
+  const empty     = document.getElementById("bm-empty");
+  const badge     = document.getElementById("bm-count");
   container.innerHTML = "";
+
+  if (!list.length) {
+    empty.style.display = "";
+    badge.style.display = "none";
+    return;
+  }
+  empty.style.display = "none";
+  badge.textContent = list.length;
+  badge.style.display = "";
 
   const statuses = await Promise.all(list.map(async entry => {
     try {
@@ -565,7 +623,57 @@ async function renderBookmarks() {
   }));
 
   list.forEach((entry, i) => {
-    container.appendChild(buildEntryRow(entry, statuses[i], { isBookmark: true }));
+    const row = buildEntryRow(entry, statuses[i], { isBookmark: true });
+
+    // Inline-editable label shown above each entry
+    const labelEl = document.createElement("div");
+    labelEl.className = "bm-label";
+    labelEl.textContent = entry.label;
+    labelEl.title = "Click to edit label";
+    labelEl.contentEditable = "false";
+
+    labelEl.addEventListener("click", e => {
+      e.stopPropagation();
+      labelEl.contentEditable = "true";
+      labelEl.classList.add("editing");
+      labelEl.focus();
+      // Place cursor at end
+      const range = document.createRange();
+      range.selectNodeContents(labelEl);
+      range.collapse(false);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    });
+
+    const saveLabel = () => {
+      labelEl.contentEditable = "false";
+      labelEl.classList.remove("editing");
+      const newLabel = labelEl.textContent.trim() || _defaultLabel(entry);
+      labelEl.textContent = newLabel;
+      if (newLabel !== entry.label) {
+        const bms = getBookmarks();
+        const bm  = bms.find(b => b.cacheId === entry.cacheId);
+        if (bm) { bm.label = newLabel; localStorage.setItem(BOOKMARK_KEY, JSON.stringify(bms)); }
+        renderBookmarks();
+      }
+    };
+
+    labelEl.addEventListener("blur", saveLabel);
+    labelEl.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); saveLabel(); }
+      if (e.key === "Escape") { labelEl.textContent = entry.label; labelEl.blur(); }
+    });
+
+    const wrap = document.createElement("div");
+    wrap.className = "bm-entry-wrap";
+
+    // Only show label if first entry for this label
+    const prevEntry = list[i - 1];
+    if (!prevEntry || prevEntry.label !== entry.label) {
+      wrap.appendChild(labelEl);
+    }
+    wrap.appendChild(row);
+    container.appendChild(wrap);
   });
 }
 
