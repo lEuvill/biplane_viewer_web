@@ -1,56 +1,147 @@
 """
 cache.py
-Redis helpers for frame storage and study metadata.
+Frame storage with an optional disk persistence layer on top of Redis.
 
-Key scheme:
+Key scheme (Redis):
   study:<id>:meta          → JSON {n_frames, cursor_frac}
   study:<id>:trans:<i>     → RGBA PNG bytes
   study:<id>:sag:<i>       → RGBA PNG bytes
   study:<id>:job_id        → Celery task ID (for dedup)
   study:<id>:status        → "loading" | "ready" | "error"
+
+Disk layout (when FRAME_STORE_DIR is set):
+  <FRAME_STORE_DIR>/<safe_id>/meta.json
+  <FRAME_STORE_DIR>/<safe_id>/trans/<frame_idx>.png
+  <FRAME_STORE_DIR>/<safe_id>/sag/<frame_idx>.png
+
+  <safe_id> is the cache_id with ':' replaced by '_' for filesystem safety.
+
+Read priority: Redis → disk → (caller re-downloads from Orthanc)
+Write: always write to both Redis and disk (if enabled).
 """
 
 import json
+from pathlib import Path
 from django.core.cache import cache
 from django.conf import settings
 
-FRAME_TTL = settings.FRAME_TTL
+FRAME_TTL      = settings.FRAME_TTL
+FRAME_STORE    = settings.FRAME_STORE_DIR   # Path or None
 
 
-def store_frame(study_id: str, frame_idx: int, trans_png: bytes, sag_png: bytes):
-    cache.set(f"study:{study_id}:trans:{frame_idx}", trans_png, timeout=FRAME_TTL)
-    cache.set(f"study:{study_id}:sag:{frame_idx}",   sag_png,   timeout=FRAME_TTL)
+# ── Disk helpers ──────────────────────────────────────────────────────────────
+
+def _safe_id(cache_id: str) -> str:
+    """Convert cache_id to a filesystem-safe directory name."""
+    return cache_id.replace(":", "_").replace("/", "_")
 
 
-def get_frame(study_id: str, frame_idx: int, plane: str) -> bytes | None:
-    return cache.get(f"study:{study_id}:{plane}:{frame_idx}")
+def _frame_path(cache_id: str, plane: str, frame_idx: int) -> Path:
+    return FRAME_STORE / _safe_id(cache_id) / plane / f"{frame_idx}.png"
 
 
-def store_meta(study_id: str, n_frames: int, cursor_frac: float):
-    cache.set(f"study:{study_id}:meta",
+def _meta_path(cache_id: str) -> Path:
+    return FRAME_STORE / _safe_id(cache_id) / "meta.json"
+
+
+def _write_disk_frame(cache_id: str, plane: str, frame_idx: int, data: bytes):
+    p = _frame_path(cache_id, plane, frame_idx)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(data)
+
+
+def _read_disk_frame(cache_id: str, plane: str, frame_idx: int) -> bytes | None:
+    p = _frame_path(cache_id, plane, frame_idx)
+    return p.read_bytes() if p.exists() else None
+
+
+def _write_disk_meta(cache_id: str, n_frames: int, cursor_frac: float):
+    p = _meta_path(cache_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"n_frames": n_frames, "cursor_frac": cursor_frac}))
+
+
+def _read_disk_meta(cache_id: str) -> dict | None:
+    p = _meta_path(cache_id)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return None
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def store_frame(cache_id: str, frame_idx: int, trans_png: bytes, sag_png: bytes):
+    cache.set(f"study:{cache_id}:trans:{frame_idx}", trans_png, timeout=FRAME_TTL)
+    cache.set(f"study:{cache_id}:sag:{frame_idx}",   sag_png,   timeout=FRAME_TTL)
+    if FRAME_STORE:
+        _write_disk_frame(cache_id, "trans", frame_idx, trans_png)
+        _write_disk_frame(cache_id, "sag",   frame_idx, sag_png)
+
+
+def get_frame(cache_id: str, frame_idx: int, plane: str) -> bytes | None:
+    # 1. Redis
+    data = cache.get(f"study:{cache_id}:{plane}:{frame_idx}")
+    if data is not None:
+        return data
+
+    # 2. Disk fallback
+    if FRAME_STORE:
+        data = _read_disk_frame(cache_id, plane, frame_idx)
+        if data is not None:
+            # Re-warm Redis so next request is fast
+            cache.set(f"study:{cache_id}:{plane}:{frame_idx}", data, timeout=FRAME_TTL)
+            return data
+
+    return None
+
+
+def store_meta(cache_id: str, n_frames: int, cursor_frac: float):
+    cache.set(f"study:{cache_id}:meta",
               json.dumps({"n_frames": n_frames, "cursor_frac": cursor_frac}),
               timeout=FRAME_TTL)
+    if FRAME_STORE:
+        _write_disk_meta(cache_id, n_frames, cursor_frac)
 
 
-def get_meta(study_id: str) -> dict | None:
-    raw = cache.get(f"study:{study_id}:meta")
-    return json.loads(raw) if raw else None
+def get_meta(cache_id: str) -> dict | None:
+    # 1. Redis
+    raw = cache.get(f"study:{cache_id}:meta")
+    if raw:
+        return json.loads(raw)
+
+    # 2. Disk fallback
+    if FRAME_STORE:
+        meta = _read_disk_meta(cache_id)
+        if meta:
+            # Re-warm Redis
+            cache.set(f"study:{cache_id}:meta",
+                      json.dumps(meta), timeout=FRAME_TTL)
+            return meta
+
+    return None
 
 
-def set_status(study_id: str, status: str, job_id: str = ""):
-    cache.set(f"study:{study_id}:status", status, timeout=FRAME_TTL)
+def set_status(cache_id: str, status: str, job_id: str = ""):
+    cache.set(f"study:{cache_id}:status", status, timeout=FRAME_TTL)
     if job_id:
-        cache.set(f"study:{study_id}:job_id", job_id, timeout=FRAME_TTL)
-        # Reverse lookup: job_id → study_id (so the WS consumer can find it)
-        cache.set(f"job:{job_id}:study_id", study_id, timeout=FRAME_TTL)
+        cache.set(f"study:{cache_id}:job_id", job_id, timeout=FRAME_TTL)
+        cache.set(f"job:{job_id}:study_id", cache_id, timeout=FRAME_TTL)
 
 
 def get_study_id_for_job(job_id: str) -> str | None:
     return cache.get(f"job:{job_id}:study_id")
 
 
-def get_status(study_id: str) -> dict:
-    status = cache.get(f"study:{study_id}:status") or "none"
-    job_id = cache.get(f"study:{study_id}:job_id") or ""
-    meta   = get_meta(study_id)
+def get_status(cache_id: str) -> dict:
+    status = cache.get(f"study:{cache_id}:status") or "none"
+    job_id = cache.get(f"study:{cache_id}:job_id") or ""
+    meta   = get_meta(cache_id)
+
+    # If disk has the frames but Redis status expired, report ready
+    if status == "none" and FRAME_STORE and _read_disk_meta(cache_id):
+        status = "ready"
+
     return {"status": status, "job_id": job_id, "meta": meta}

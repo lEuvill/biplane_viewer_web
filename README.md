@@ -22,7 +22,8 @@ Redis (frame cache + task broker + WebSocket channel layer)
 | **Daphne** | ASGI server — handles HTTP requests and WebSocket connections for live progress |
 | **Celery** | Background worker — downloads DICOM files from Orthanc and decodes frames in parallel |
 | **Redis DB 0** | Django Channels layer (WebSocket routing) |
-| **Redis DB 1** | Frame cache — stores decoded RGBA PNGs keyed by `cache_id` |
+| **Redis DB 1** | Frame cache — stores decoded RGBA PNGs keyed by `cache_id`. Acts as a fast read-through cache on top of the disk store when `FRAME_STORE_DIR` is set. |
+| **Disk store** | Optional (`FRAME_STORE_DIR`). Permanent frame storage — frames written here after first decode are never re-decoded, even after Redis TTL expires. |
 | **Redis DB 2** | Celery broker and result backend |
 | **SQLite** | Stores `SharedStudy` records — maps `cache_id` → instance IDs so shared links can auto-reload after the Redis cache expires |
 | **Three.js** | Browser-side 3D rendering — image planes stacked in 3D space |
@@ -72,6 +73,7 @@ nano .env                       # fill in all required values
 | `CSRF_TRUSTED_ORIGINS` | ✓ (HTTPS) | Full origin URLs e.g. `https://biplane.example.com` — required when running behind a reverse proxy |
 | `REDIS_URL` | — | Defaults to `redis://127.0.0.1:6379` |
 | `FRAME_TTL` | — | Frame cache lifetime in seconds. Default `86400` (24 h). Lower if Redis RAM is limited. |
+| `FRAME_STORE_DIR` | — | Path to a directory for permanent frame storage on disk. When set, decoded frames are saved after the first render and Redis acts as a cache on top — frames are never re-decoded even after the Redis TTL expires. Leave empty to use Redis-only storage. |
 | `DEBUG` | — | `True` for local dev only. **Must be `False` in production.** |
 
 Generate a secret key:

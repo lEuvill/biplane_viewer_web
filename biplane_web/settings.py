@@ -76,6 +76,13 @@ CHANNEL_LAYERS = {
 
 FRAME_TTL = int(os.getenv("FRAME_TTL", "86400"))   # default 24 h; lower if RAM is tight
 
+# Optional disk frame store. When set, decoded frames are saved to disk permanently
+# and Redis acts as a read-through cache on top. Frames are never re-decoded if
+# found on disk, even after the Redis TTL expires.
+# Leave empty (default) to keep the original Redis-only behaviour.
+_store = os.getenv("FRAME_STORE_DIR", "")
+FRAME_STORE_DIR = Path(_store) if _store else None
+
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
