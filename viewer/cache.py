@@ -10,6 +10,8 @@ Key scheme:
   study:<id>:status        → "loading" | "ready" | "error"
 """
 
+from __future__ import annotations
+
 import json
 from django.core.cache import cache
 from django.conf import settings
