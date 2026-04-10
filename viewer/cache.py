@@ -20,6 +20,8 @@ Read priority: Redis → disk → (caller re-downloads from Orthanc)
 Write: always write to both Redis and disk (if enabled).
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from django.core.cache import cache
