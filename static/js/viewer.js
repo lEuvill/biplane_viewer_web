@@ -992,8 +992,7 @@ function startPlay() {
   playTimer = setInterval(() => {
     currentFrame = (currentFrame + 1) % nFrames;
     updateFrameUI();
-    buildSingle(currentFrame);
-    buildSagittal();
+    buildSingle(currentFrame);   // already calls buildSagittal internally
   }, 1000 / fps);
 }
 function stopPlay() {
@@ -1041,6 +1040,9 @@ function onLoadComplete() {
   if (!VIEWER_CONFIG.shared) buildSlotsUI();
   buildStack();
   updateFrameUI();
+  // Preload all sag textures in the background so switching to single-frame
+  // mode shows the sagittal immediately without needing a full play loop first.
+  for (let i = 0; i < nFrames; i++) getTexture(i, "sag");
 }
 
 // jobId is injected by the Django template (set when auto-reloading an expired shared link)
