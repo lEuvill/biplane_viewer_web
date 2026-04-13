@@ -1114,8 +1114,30 @@ if (nFrames > 0 && !activeJobId) {
   }, 2000);
 
 } else {
-  // No frames cached and no job_id — send back to search
-  window.location.href = "/";
+  // No frames and no job_id — poll status before giving up.
+  // This handles the case where the task just completed but the Django view
+  // served a stale/empty page (e.g. Redis cache miss on the redirected load).
+  (async () => {
+    try {
+      const resp = await fetch(`/api/status/${studyId}/?cache_id=${encodeURIComponent(cacheId)}`);
+      const data = await resp.json();
+      if (data.status === "loading" && data.job_id) {
+        // Task is still running — reconnect to it
+        const sep = window.location.search ? "&" : "?";
+        window.location.href = `/viewer/${studyId}/?cache_id=${encodeURIComponent(cacheId)}&job_id=${data.job_id}`;
+        return;
+      }
+      if (data.status === "ready") {
+        // Frames are in cache now — reload without job_id to enter the viewer
+        window.location.reload();
+        return;
+      }
+    } catch (e) {
+      console.error("[status check] error:", e);
+    }
+    // Truly unknown study — go back to search
+    window.location.href = "/";
+  })();
 }
 
 function getCsrfToken() {

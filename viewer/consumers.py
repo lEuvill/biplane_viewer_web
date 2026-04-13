@@ -43,11 +43,21 @@ class ProgressConsumer(AsyncWebsocketConsumer):
 
             if status["status"] == "ready":
                 meta = status.get("meta") or {}
-                await self.send(text_data=json.dumps({
-                    "phase":       "complete",
-                    "n_frames":    meta.get("n_frames", 0),
-                    "cursor_frac": meta.get("cursor_frac", 0.5),
-                }))
+                n_frames = meta.get("n_frames", 0)
+                if n_frames == 0:
+                    # Status is "ready" but meta key is a cache miss — treat as
+                    # still-loading so the client polls /api/status instead of
+                    # redirecting to a viewer page that would have n_frames=0.
+                    await self.send(text_data=json.dumps({
+                        "phase": "init",
+                        "msg":   "Finalising… waiting for frame index.",
+                    }))
+                else:
+                    await self.send(text_data=json.dumps({
+                        "phase":       "complete",
+                        "n_frames":    n_frames,
+                        "cursor_frac": meta.get("cursor_frac", 0.5),
+                    }))
             elif status["status"] == "error":
                 await self.send(text_data=json.dumps({
                     "phase": "error",
