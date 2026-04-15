@@ -101,6 +101,45 @@
       </div>
     </div>
 
+    <!-- Segmentation -->
+    <div class="panel-section">
+      <div class="section-title">SEGMENTATION</div>
+      <button id="seg-run-btn" style="width:100%">Run artery segmentation</button>
+      <div id="seg-status-row" style="margin-top:6px;display:none">
+        <div class="progress-bar-wrap">
+          <div id="seg-progress-bar" class="progress-bar" style="width:0%"></div>
+        </div>
+        <div id="seg-status-text" style="font-size:11px;color:#aaa;margin-top:3px;text-align:center">
+          Waiting…
+        </div>
+      </div>
+      <div id="seg-controls" style="margin-top:6px;display:none">
+        <div class="slider-row">
+          <span class="sl-label">Artery</span>
+          <input type="range" id="seg-opacity-slider" min="0" max="100" value="60" step="1">
+          <span class="sl-val" id="seg-opacity-val">0.60</span>
+          <input type="color" id="seg-color-picker" value="#ff6600" title="Artery overlay color">
+        </div>
+        <div class="slider-row">
+          <span class="sl-label">Lumen</span>
+          <input type="range" id="lumen-opacity-slider" min="0" max="100" value="70" step="1">
+          <span class="sl-val" id="lumen-opacity-val">0.70</span>
+          <input type="color" id="lumen-color-picker" value="#00ccff" title="Lumen overlay color">
+        </div>
+        <div class="slider-row">
+          <span class="sl-label">Plaque</span>
+          <input type="range" id="plaque-opacity-slider" min="0" max="100" value="70" step="1">
+          <span class="sl-val" id="plaque-opacity-val">0.70</span>
+          <input type="color" id="plaque-color-picker" value="#ffdd00" title="Plaque overlay color">
+        </div>
+        <div style="margin-top:4px;display:flex;gap:8px;flex-wrap:wrap">
+          <label class="check-label"><input type="checkbox" id="seg-show-cb"    checked> Artery</label>
+          <label class="check-label"><input type="checkbox" id="lumen-show-cb"  checked> Lumen</label>
+          <label class="check-label"><input type="checkbox" id="plaque-show-cb" checked> Plaque</label>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /panel -->
 
   <!-- ── Canvas area ────────────────────────────────────── -->

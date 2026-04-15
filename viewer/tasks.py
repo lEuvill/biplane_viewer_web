@@ -8,7 +8,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 from .orthanc import orthanc_get_biplane_instances, orthanc_get_instances_by_ids, load_frames_from_orthanc
-from .cache   import store_frame, store_meta, set_status
+from .cache   import store_frame, store_meta, set_status, get_meta, set_seg_status, get_seg_status
 
 
 def _push(job_id: str, msg: dict):
@@ -73,4 +73,57 @@ def load_study_task(self, study_id: str, instance_ids: list = None, cache_id: st
     except Exception as exc:
         set_status(cache_id, "error")
         _push(job_id, {"phase": "error", "msg": str(exc)})
+        raise
+
+
+def _load_run_segmentation():
+    """
+    Load run_segmentation directly from the source file on disk, bypassing
+    Python's sys.modules cache.  This means changes to segmentation.py are
+    always picked up without restarting the Celery worker.
+    """
+    import importlib.util
+    from pathlib import Path
+    seg_path = Path(__file__).parent / "segmentation.py"
+    spec = importlib.util.spec_from_file_location("_segmentation_fresh", seg_path)
+    mod  = importlib.util.module_from_spec(spec)
+    # Set the package so relative imports (from .cache import …) resolve correctly
+    mod.__package__ = "viewer"
+    spec.loader.exec_module(mod)
+    return mod.run_segmentation
+
+
+@shared_task(bind=True)
+def segment_study_task(self, cache_id: str):
+    """
+    Run nnUNet segmentation on all transverse frames of a loaded study.
+    Stores per-frame binary mask PNGs in the cache under the same cache_id.
+    Pushes progress events over WebSocket using the same job_id mechanism.
+    """
+    run_segmentation = _load_run_segmentation()
+
+    job_id = self.request.id
+    set_seg_status(cache_id, "running", job_id)
+
+    try:
+        meta = get_meta(cache_id)
+        if not meta:
+            raise RuntimeError(
+                f"Study '{cache_id}' not found in cache. Load the study first."
+            )
+        n_frames = meta["n_frames"]
+
+        _push(job_id, {"phase": "seg_start", "total": n_frames})
+
+        def on_progress(done, total):
+            _push(job_id, {"phase": "seg_progress", "done": done, "total": total})
+
+        run_segmentation(cache_id, n_frames, progress_cb=on_progress)
+
+        set_seg_status(cache_id, "ready", job_id)
+        _push(job_id, {"phase": "seg_complete", "n_frames": n_frames})
+
+    except Exception as exc:
+        set_seg_status(cache_id, "error")
+        _push(job_id, {"phase": "seg_error", "msg": str(exc)})
         raise

@@ -4,14 +4,15 @@ HTTP views for the biplane web viewer.
 """
 
 import json
+import re as _re
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_POST, require_GET
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from .orthanc import orthanc_find_studies, orthanc_fetch_frame_bgr
-from .cache   import get_frame, get_status, get_meta, set_status
-from .tasks   import load_study_task
+from .orthanc import orthanc_find_studies, orthanc_fetch_frame_bgr, orthanc_get_patient_dob
+from .cache   import get_frame, get_status, get_meta, set_status, get_seg_mask, get_seg_status, set_seg_status
+from .tasks   import load_study_task, segment_study_task
 from .models  import SharedStudy
 
 import cv2
@@ -150,6 +151,52 @@ def api_frame(request, study_id, frame_idx, plane):
     return HttpResponse(data, content_type="image/png")
 
 
+@require_POST
+def api_segment_study(request, study_id):
+    """Trigger nnUNet segmentation for a loaded study. Idempotent."""
+    try:
+        cache_id = request.GET.get("cache_id", study_id)
+        seg_status = get_seg_status(cache_id)
+        force = request.GET.get("force", "0") == "1"
+
+        if not force and seg_status["status"] == "ready":
+            return JsonResponse({"status": "ready", "job_id": seg_status["job_id"]})
+
+        if seg_status["status"] == "running" and seg_status["job_id"]:
+            from celery.result import AsyncResult
+            ar = AsyncResult(seg_status["job_id"])
+            if ar.state not in ("FAILURE", "SUCCESS", "REVOKED"):
+                return JsonResponse({"status": "running", "job_id": seg_status["job_id"]})
+
+        if not get_meta(cache_id):
+            return JsonResponse({"error": "Study not loaded — load the study first."}, status=400)
+
+        task = segment_study_task.delay(cache_id)
+        set_seg_status(cache_id, "running", task.id)
+        return JsonResponse({"status": "running", "job_id": task.id})
+
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@require_GET
+def api_seg_status(request, study_id):
+    cache_id = request.GET.get("cache_id", study_id)
+    return JsonResponse(get_seg_status(cache_id))
+
+
+@require_GET
+def api_seg_frame(request, study_id, frame_idx, plane):
+    if plane not in ("seg", "lumen", "plaque"):
+        return HttpResponse(status=400)
+    cache_id = request.GET.get("cache_id", study_id)
+    data = get_seg_mask(cache_id, int(frame_idx), plane=plane)
+    if data is None:
+        return HttpResponse(status=404)
+    return HttpResponse(data, content_type="image/png")
+
+
 @require_GET
 def api_preview(request, study_id, plane):
     """
@@ -187,5 +234,45 @@ def api_instances(request, study_id):
                 "idx":       idx,
             })
         return JsonResponse({"instances": result})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def _normalize_dob(raw: str) -> str:
+    """Normalize a user-typed date string to YYYYMMDD, or return '' if unrecognised."""
+    s = raw.strip().replace("-", "/").replace(".", "/").replace(" ", "")
+    if _re.match(r'^\d{8}$', s):
+        return s
+    m = _re.match(r'^(\d{4})/(\d{1,2})/(\d{1,2})$', s)
+    if m:
+        return f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}"
+    m = _re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', s)
+    if m:
+        return f"{m.group(3)}{int(m.group(1)):02d}{int(m.group(2)):02d}"
+    return ""
+
+
+@require_POST
+def api_verify_dob(request, study_id):
+    """
+    Verify a patient's date of birth against Orthanc.
+    POST body: {"dob": "<user-entered date>"}
+    Returns:   {"verified": true/false}  or  {"verified": true, "no_dob": true}
+               when Orthanc has no DOB on record.
+    The stored DOB is never returned to the client.
+    """
+    try:
+        body    = json.loads(request.body)
+        entered = body.get("dob", "").strip()
+        if not entered:
+            return JsonResponse({"error": "dob required"}, status=400)
+        normalized = _normalize_dob(entered)
+        if not normalized:
+            return JsonResponse({"verified": False, "reason": "invalid_format"})
+        stored = orthanc_get_patient_dob(study_id)
+        if not stored:
+            # No DOB on record — cannot verify; allow through
+            return JsonResponse({"verified": True, "no_dob": True})
+        return JsonResponse({"verified": normalized == stored.strip()})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)

@@ -6,6 +6,9 @@ Key scheme (Redis):
   study:<id>:meta          → JSON {n_frames, cursor_frac}
   study:<id>:trans:<i>     → RGBA PNG bytes
   study:<id>:sag:<i>       → RGBA PNG bytes
+  study:<id>:seg:<i>       → grayscale PNG bytes (0=bg, 255=artery)
+  study:<id>:seg_status    → "none" | "running" | "ready" | "error"
+  study:<id>:seg_job_id    → Celery task ID for segmentation
   study:<id>:job_id        → Celery task ID (for dedup)
   study:<id>:status        → "loading" | "ready" | "error"
 
@@ -13,6 +16,7 @@ Disk layout (when FRAME_STORE_DIR is set):
   <FRAME_STORE_DIR>/<safe_id>/meta.json
   <FRAME_STORE_DIR>/<safe_id>/trans/<frame_idx>.png
   <FRAME_STORE_DIR>/<safe_id>/sag/<frame_idx>.png
+  <FRAME_STORE_DIR>/<safe_id>/seg/<frame_idx>.png
 
   <safe_id> is the cache_id with ':' replaced by '_' for filesystem safety.
 
@@ -131,6 +135,76 @@ def set_status(cache_id: str, status: str, job_id: str = ""):
     if job_id:
         cache.set(f"study:{cache_id}:job_id", job_id, timeout=FRAME_TTL)
         cache.set(f"job:{job_id}:study_id", cache_id, timeout=FRAME_TTL)
+
+
+def store_seg_mask(cache_id: str, frame_idx: int, mask_png: bytes,
+                   plane: str = "seg"):
+    """plane: 'seg' (artery), 'lumen', or 'plaque'"""
+    cache.set(f"study:{cache_id}:{plane}:{frame_idx}", mask_png, timeout=FRAME_TTL)
+    if FRAME_STORE:
+        _write_disk_frame(cache_id, plane, frame_idx, mask_png)
+
+
+def get_seg_mask(cache_id: str, frame_idx: int,
+                 plane: str = "seg") -> bytes | None:
+    """plane: 'seg' (artery), 'lumen', or 'plaque'"""
+    data = cache.get(f"study:{cache_id}:{plane}:{frame_idx}")
+    if data is not None:
+        return data
+    if FRAME_STORE:
+        data = _read_disk_frame(cache_id, plane, frame_idx)
+        if data is not None:
+            cache.set(f"study:{cache_id}:{plane}:{frame_idx}", data, timeout=FRAME_TTL)
+            return data
+    return None
+
+
+def set_seg_status(cache_id: str, status: str, job_id: str = ""):
+    cache.set(f"study:{cache_id}:seg_status",  status, timeout=FRAME_TTL)
+    if job_id:
+        cache.set(f"study:{cache_id}:seg_job_id", job_id, timeout=FRAME_TTL)
+        cache.set(f"job:{job_id}:study_id", cache_id, timeout=FRAME_TTL)
+
+
+def _seg_complete(cache_id: str) -> bool:
+    """
+    True only if all three mask planes exist for both frame 0 and the last frame.
+    Uses the study meta to determine n_frames; falls back to checking frame 0 only
+    if meta is unavailable.
+    """
+    meta = _read_disk_meta(cache_id) if FRAME_STORE else None
+    if meta is None:
+        raw = cache.get(f"study:{cache_id}:meta")
+        if raw:
+            import json as _json
+            meta = _json.loads(raw)
+
+    n_frames = meta["n_frames"] if meta else 1
+    check_frames = {0, max(0, n_frames - 1)}   # first + last
+
+    for frame_idx in check_frames:
+        for plane in ("seg", "lumen", "plaque"):
+            if cache.get(f"study:{cache_id}:{plane}:{frame_idx}") is not None:
+                continue
+            if FRAME_STORE and _read_disk_frame(cache_id, plane, frame_idx) is not None:
+                continue
+            return False
+    return True
+
+
+def get_seg_status(cache_id: str) -> dict:
+    status = cache.get(f"study:{cache_id}:seg_status") or "none"
+    job_id = cache.get(f"study:{cache_id}:seg_job_id") or ""
+
+    # If Redis says ready, verify all planes are actually present at first+last frame
+    if status == "ready" and not _seg_complete(cache_id):
+        status = "none"
+
+    # Disk recovery: Redis expired but masks exist on disk
+    if status == "none" and FRAME_STORE and _seg_complete(cache_id):
+        status = "ready"
+
+    return {"status": status, "job_id": job_id}
 
 
 def get_study_id_for_job(job_id: str) -> str | None:

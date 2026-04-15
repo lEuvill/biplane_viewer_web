@@ -104,6 +104,38 @@
 <!-- Context menu -->
 <div id="ctx-menu" class="ctx-menu" style="display:none"></div>
 
+<!-- DOB verification modal -->
+<div id="dob-overlay" style="display:none;position:fixed;inset:0;z-index:1000;
+     background:rgba(0,0,0,0.78);align-items:center;justify-content:center;">
+  <div style="background:#111;border:1px solid #2e2e2e;border-radius:10px;
+              padding:28px;width:400px;max-width:90vw;">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+      <span style="font-size:24px;">🔒</span>
+      <span style="font-size:15px;font-weight:bold;color:#f0f0f0;">Patient Verification Required</span>
+    </div>
+    <div style="height:1px;background:#2e2e2e;margin-bottom:16px;"></div>
+    <p style="color:#e0e0e0;font-size:12px;margin:0 0 6px;">
+      Enter the patient's date of birth to access this recording.</p>
+    <p style="color:#505050;font-size:10px;margin:0 0 14px;">
+      Accepted formats: MM/DD/YYYY &nbsp;·&nbsp; YYYY-MM-DD &nbsp;·&nbsp; YYYYMMDD</p>
+    <input id="dob-input" type="text" placeholder="MM/DD/YYYY" autocomplete="off"
+           style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #2e2e2e;
+                  border-radius:5px;color:#f0f0f0;font-size:14px;padding:8px 12px;
+                  margin-bottom:8px;outline:none;">
+    <div id="dob-error" style="display:none;color:#ff4444;font-size:11px;margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button id="dob-cancel"
+              style="background:#1a1a1a;border:1px solid #2e2e2e;border-radius:5px;
+                     color:#888;font-size:11px;font-weight:bold;padding:7px 18px;cursor:pointer;">
+        Cancel</button>
+      <button id="dob-confirm"
+              style="background:#C41010;border:1px solid #E02020;border-radius:5px;
+                     color:#fff;font-size:11px;font-weight:bold;padding:7px 18px;cursor:pointer;">
+        Confirm</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -175,8 +207,102 @@ function removeFromRecent(cacheId) {
   renderRecent();
 }
 
+// ── DOB Verification Modal ────────────────────────────────────────────────
+const dobOverlay = document.getElementById("dob-overlay");
+const dobInput   = document.getElementById("dob-input");
+const dobError   = document.getElementById("dob-error");
+const dobCancel  = document.getElementById("dob-cancel");
+const dobConfirm = document.getElementById("dob-confirm");
+
+let _dobStudyId  = null;
+let _dobAttempts = 0;
+let _dobResolve  = null;
+
+function showDobModal(studyId) {
+  return new Promise(resolve => {
+    _dobStudyId  = studyId;
+    _dobAttempts = 0;
+    _dobResolve  = resolve;
+    dobInput.value = "";
+    dobError.style.display = "none";
+    dobError.textContent   = "";
+    dobConfirm.disabled    = false;
+    dobConfirm.textContent = "Confirm";
+    dobOverlay.style.display = "flex";
+    setTimeout(() => dobInput.focus(), 50);
+  });
+}
+
+function hideDobModal() {
+  dobOverlay.style.display = "none";
+}
+
+dobCancel.addEventListener("click", () => {
+  hideDobModal();
+  if (_dobResolve) { _dobResolve(false); _dobResolve = null; }
+});
+
+async function _dobTryConfirm() {
+  const entered = dobInput.value.trim();
+  if (!entered) {
+    dobError.textContent   = "Please enter a date of birth.";
+    dobError.style.display = "";
+    dobInput.focus();
+    return;
+  }
+  dobConfirm.disabled    = true;
+  dobConfirm.textContent = "Checking…";
+  try {
+    const resp = await fetch(`/api/verify_dob/${_dobStudyId}/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": getCsrfToken() },
+      body: JSON.stringify({ dob: entered }),
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    if (data.verified) {
+      hideDobModal();
+      if (_dobResolve) { _dobResolve(true); _dobResolve = null; }
+      return;
+    }
+    _dobAttempts++;
+    const remaining = 3 - _dobAttempts;
+    dobConfirm.disabled    = false;
+    dobConfirm.textContent = "Confirm";
+    if (remaining <= 0) {
+      dobError.textContent   = "Too many incorrect attempts. Access denied.";
+      dobError.style.display = "";
+      dobConfirm.disabled    = true;
+      setTimeout(() => {
+        hideDobModal();
+        if (_dobResolve) { _dobResolve(false); _dobResolve = null; }
+      }, 1800);
+    } else {
+      dobError.textContent   = `Incorrect date of birth. ${remaining} attempt${remaining !== 1 ? "s" : ""} remaining.`;
+      dobError.style.display = "";
+      dobInput.value = "";
+      dobInput.focus();
+    }
+  } catch (e) {
+    dobConfirm.disabled    = false;
+    dobConfirm.textContent = "Confirm";
+    dobError.textContent   = "Verification error: " + e.message;
+    dobError.style.display = "";
+  }
+}
+
+dobConfirm.addEventListener("click", _dobTryConfirm);
+dobInput.addEventListener("keydown", e => { if (e.key === "Enter") _dobTryConfirm(); });
+
 // ── Entry actions ─────────────────────────────────────────────────────────
 async function openEntry(entry) {
+  // DOB verification
+  const verified = await showDobModal(entry.studyId);
+  if (!verified) {
+    showToast("Access denied — patient verification failed.");
+    return;
+  }
+
   // Bump loadedAt in recent
   localStorage.setItem(RECENT_KEY, JSON.stringify(
     getRecent().map(r => r.cacheId === entry.cacheId ? { ...r, loadedAt: Date.now() } : r)
@@ -489,6 +615,14 @@ function clearPreview() {
 // ── Launch ────────────────────────────────────────────────────────────────
 async function launchViewer() {
   if (!selectedStudyId || !selectedInstances.length) return;
+
+  // DOB verification before any data is fetched
+  const verified = await showDobModal(selectedStudyId);
+  if (!verified) {
+    setStatus("Access denied — patient verification failed.", "error");
+    return;
+  }
+
   launchBtn.disabled = true; launchBtn.textContent = "Loading…";
   try {
     const resp = await fetch(`/api/load/${selectedStudyId}/`, {

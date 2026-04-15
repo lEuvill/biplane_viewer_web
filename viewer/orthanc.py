@@ -58,6 +58,15 @@ def orthanc_find_studies(patient_name: str) -> list:
     return _orhttp("POST", "/tools/find", json=body).json()
 
 
+def orthanc_get_patient_dob(study_id: str) -> str:
+    """Return PatientBirthDate (YYYYMMDD) for a study from Orthanc, or ''."""
+    try:
+        study = _orhttp("GET", f"/studies/{study_id}").json()
+        return study.get("PatientMainDicomTags", {}).get("PatientBirthDate", "")
+    except Exception:
+        return ""
+
+
 def orthanc_get_instances_by_ids(instance_ids: list) -> list:
     """Fetch instance metadata for a specific list of Orthanc instance IDs."""
     instances = []

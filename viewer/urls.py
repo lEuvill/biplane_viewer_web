@@ -13,6 +13,15 @@ urlpatterns = [
     path("api/status/<str:study_id>/",      views.api_study_status,    name="api_status"),
     path("api/preview/<str:study_id>/<str:plane>/", views.api_preview,  name="api_preview"),
     path("api/instances/<str:study_id>/",   views.api_instances,       name="api_instances"),
+    path("api/verify_dob/<str:study_id>/", views.api_verify_dob,      name="api_verify_dob"),
     path("api/frames/<str:study_id>/<int:frame_idx>/<str:plane>/",
          views.api_frame, name="api_frame"),
+
+    # Segmentation
+    path("api/segment/<str:study_id>/",
+         views.api_segment_study, name="api_segment"),
+    path("api/seg_status/<str:study_id>/",
+         views.api_seg_status, name="api_seg_status"),
+    path("api/seg_frames/<str:study_id>/<int:frame_idx>/<str:plane>/",
+         views.api_seg_frame, name="api_seg_frame"),
 ]

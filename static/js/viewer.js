@@ -75,6 +75,15 @@ let sagColor     = new THREE.Color(1, 1, 1);
 // Mesh references
 let stackMeshes = [];
 let sagMesh     = null;
+// Segmentation state
+let segReady   = false;
+
+// Per-layer state: artery / lumen / plaque
+const SEG_LAYERS = {
+  seg:    { enabled: true, opacity: 0.60, color: new THREE.Color(1.0, 0.40, 0.0),  meshes: [], texCache: new Map() },
+  lumen:  { enabled: true, opacity: 0.70, color: new THREE.Color(0.0, 0.80, 1.0),  meshes: [], texCache: new Map() },
+  plaque: { enabled: true, opacity: 0.70, color: new THREE.Color(1.0, 0.87, 0.0),  meshes: [], texCache: new Map() },
+};
 
 // Texture cache — avoid re-fetching loaded textures
 const texCache = new Map();
@@ -149,6 +158,48 @@ function makeMaterial(frameTex, opacity, clippingPlanes = [], brightAlpha = fals
   });
 }
 
+// ── Segmentation overlay shader & material ────────────────────────────────────
+const SEG_FRAG_SHADER = `
+uniform sampler2D tSeg;
+uniform vec3      uSegColor;
+uniform float     uSegOpacity;
+varying vec2 vUv;
+void main() {
+  float v = texture2D(tSeg, vUv).r;
+  gl_FragColor = vec4(uSegColor, v * uSegOpacity);
+}`;
+
+function getSegTexture(layer, idx) {
+  if (!layer.texCache.has(idx)) {
+    const tex = loader.load(
+      `/api/seg_frames/${studyId}/${idx}/${layer.name}/?cache_id=${encodeURIComponent(cacheId)}`
+    );
+    tex.colorSpace = THREE.NoColorSpace;
+    layer.texCache.set(idx, tex);
+  }
+  return layer.texCache.get(idx);
+}
+
+function makeSegMaterial(layer, idx, clippingPlanes = []) {
+  const c = layer.color;
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      tSeg:        { value: getSegTexture(layer, idx) },
+      uSegColor:   { value: new THREE.Vector3(c.r, c.g, c.b) },
+      uSegOpacity: { value: layer.opacity },
+    },
+    vertexShader:   VERT_SHADER,
+    fragmentShader: SEG_FRAG_SHADER,
+    transparent:    true,
+    depthWrite:     false,
+    side:           THREE.DoubleSide,
+    clippingPlanes,
+  });
+}
+
+// Assign name so getSegTexture can build the URL
+Object.keys(SEG_LAYERS).forEach(k => { SEG_LAYERS[k].name = k; });
+
 // ── Sagittal clip planes ──────────────────────────────────────────────────────
 function makeSagClipPlanes() {
   const zMin = Math.max(0,    sagZOffset - sagClipDist);
@@ -169,6 +220,19 @@ function buildStack() {
     mesh.position.set(PROC_W / 2, PROC_H / 2, i * EFF_Z);
     scene.add(mesh);
     stackMeshes.push(mesh);
+    if (segReady) {
+      let zOff = 0.1;
+      Object.values(SEG_LAYERS).forEach(layer => {
+        if (!layer.enabled) return;
+        const sGeo  = new THREE.PlaneGeometry(PROC_W, PROC_H);
+        const sMat  = makeSegMaterial(layer, i);
+        const sMesh = new THREE.Mesh(sGeo, sMat);
+        sMesh.position.set(PROC_W / 2, PROC_H / 2, i * EFF_Z + zOff);
+        scene.add(sMesh);
+        layer.meshes.push(sMesh);
+        zOff += 0.1;
+      });
+    }
   }
   buildSagittal();
 }
@@ -178,10 +242,22 @@ function buildSingle(idx) {
   const geo  = new THREE.PlaneGeometry(PROC_W, PROC_H);
   const mat  = makeMaterial(getTexture(idx, "trans"), transOpacity, [], false, transColor);
   const mesh = new THREE.Mesh(geo, mat);
-  // In single mode the transverse plane sits at z_offset (matching draw_single in desktop)
   mesh.position.set(PROC_W / 2, PROC_H / 2, sagZOffset);
   scene.add(mesh);
   stackMeshes.push(mesh);
+  if (segReady) {
+    let zOff = 0.1;
+    Object.values(SEG_LAYERS).forEach(layer => {
+      if (!layer.enabled) return;
+      const sGeo  = new THREE.PlaneGeometry(PROC_W, PROC_H);
+      const sMat  = makeSegMaterial(layer, idx);
+      const sMesh = new THREE.Mesh(sGeo, sMat);
+      sMesh.position.set(PROC_W / 2, PROC_H / 2, sagZOffset + zOff);
+      scene.add(sMesh);
+      layer.meshes.push(sMesh);
+      zOff += 0.1;
+    });
+  }
   buildSagittal();
 }
 
@@ -210,6 +286,10 @@ function buildSagittal() {
 function clearStackMeshes() {
   stackMeshes.forEach(m => scene.remove(m));
   stackMeshes = [];
+  Object.values(SEG_LAYERS).forEach(layer => {
+    layer.meshes.forEach(m => scene.remove(m));
+    layer.meshes = [];
+  });
 }
 
 function redraw() {
@@ -1149,6 +1229,159 @@ document.getElementById("share-btn").addEventListener("click", () => {
     setTimeout(() => { confirm.style.display = "none"; }, 2500);
   });
 });
+} // end !shared
+
+// ── Segmentation UI ───────────────────────────────────────────────────────────
+if (!VIEWER_CONFIG.shared) {
+
+const segRunBtn      = document.getElementById("seg-run-btn");
+const segStatusRow   = document.getElementById("seg-status-row");
+const segProgressBar = document.getElementById("seg-progress-bar");
+const segStatusText  = document.getElementById("seg-status-text");
+const segControls    = document.getElementById("seg-controls");
+
+let segPollTimer = null;
+
+function stopSegPoll() {
+  if (segPollTimer) { clearInterval(segPollTimer); segPollTimer = null; }
+}
+
+function onSegReady() {
+  stopSegPoll();
+  segReady = true;
+  segStatusRow.style.display   = "none";
+  segControls.style.display    = "block";
+  segRunBtn.textContent        = "Re-run segmentation";
+  segRunBtn.disabled           = false;
+  // Preload all seg textures for all layers
+  for (let i = 0; i < nFrames; i++) {
+    Object.values(SEG_LAYERS).forEach(layer => getSegTexture(layer, i));
+  }
+  redraw();
+}
+
+function startSegPoll(jobId) {
+  stopSegPoll();
+  segPollTimer = setInterval(async () => {
+    try {
+      const resp = await fetch(
+        `/api/seg_status/${studyId}/?cache_id=${encodeURIComponent(cacheId)}`
+      );
+      const data = await resp.json();
+      if (data.status === "ready") {
+        onSegReady();
+      } else if (data.status === "error") {
+        stopSegPoll();
+        segStatusText.textContent = "Segmentation failed — check server logs.";
+        segStatusText.style.color = "#e74c3c";
+        segRunBtn.disabled = false;
+      }
+    } catch (e) {
+      console.error("[seg poll]", e);
+    }
+  }, 2000);
+}
+
+// WebSocket seg progress (uses existing WS infrastructure via job_id group)
+function listenSegWs(jobId) {
+  const wsProto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${wsProto}://${location.host}/ws/progress/${jobId}/`);
+  ws.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.phase === "seg_progress") {
+      const pct = msg.total > 0 ? (msg.done / msg.total) * 100 : 0;
+      segProgressBar.style.width = pct + "%";
+      segStatusText.textContent  = `Segmenting… ${msg.done}/${msg.total} frames`;
+    } else if (msg.phase === "seg_complete") {
+      onSegReady();
+    } else if (msg.phase === "seg_error") {
+      stopSegPoll();
+      segStatusText.textContent = "Error: " + msg.msg;
+      segStatusText.style.color = "#e74c3c";
+      segRunBtn.disabled = false;
+    }
+  };
+  ws.onerror = () => startSegPoll(jobId);  // fall back to polling on WS error
+}
+
+// Check if segmentation is already done (e.g. after page reload)
+(async () => {
+  try {
+    const resp = await fetch(
+      `/api/seg_status/${studyId}/?cache_id=${encodeURIComponent(cacheId)}`
+    );
+    const data = await resp.json();
+    if (data.status === "ready") {
+      onSegReady();
+    } else if (data.status === "running" && data.job_id) {
+      segRunBtn.disabled = true;
+      segStatusRow.style.display = "block";
+      segStatusText.textContent  = "Segmentation in progress…";
+      listenSegWs(data.job_id);
+      startSegPoll(data.job_id);
+    }
+  } catch (e) { /* ignore */ }
+})();
+
+segRunBtn.addEventListener("click", async () => {
+  segRunBtn.disabled = true;
+  segStatusRow.style.display   = "block";
+  segControls.style.display    = "none";
+  segProgressBar.style.width   = "0%";
+  segStatusText.textContent    = "Starting segmentation…";
+  segStatusText.style.color    = "";
+  try {
+    const resp = await fetch(
+      `/api/segment/${studyId}/?cache_id=${encodeURIComponent(cacheId)}&force=1`,
+      { method: "POST", headers: { "X-CSRFToken": getCsrfToken() } }
+    );
+    const data = await resp.json();
+    if (data.status === "ready") {
+      onSegReady();
+    } else if (data.job_id) {
+      listenSegWs(data.job_id);
+      startSegPoll(data.job_id);
+    } else {
+      segStatusText.textContent = data.error || "Unknown error";
+      segStatusText.style.color = "#e74c3c";
+      segRunBtn.disabled = false;
+    }
+  } catch (e) {
+    segStatusText.textContent = "Request failed: " + e;
+    segStatusText.style.color = "#e74c3c";
+    segRunBtn.disabled = false;
+  }
+});
+
+// Per-layer opacity/color/toggle wiring
+[
+  { layerKey: "seg",    opacityId: "seg-opacity-slider",    opacityValId: "seg-opacity-val",    colorId: "seg-color-picker",    checkId: "seg-show-cb"    },
+  { layerKey: "lumen",  opacityId: "lumen-opacity-slider",  opacityValId: "lumen-opacity-val",  colorId: "lumen-color-picker",  checkId: "lumen-show-cb"  },
+  { layerKey: "plaque", opacityId: "plaque-opacity-slider", opacityValId: "plaque-opacity-val", colorId: "plaque-color-picker", checkId: "plaque-show-cb" },
+].forEach(({ layerKey, opacityId, opacityValId, colorId, checkId }) => {
+  const layer = SEG_LAYERS[layerKey];
+
+  document.getElementById(opacityId).addEventListener("input", function () {
+    layer.opacity = this.value / 100;
+    document.getElementById(opacityValId).textContent = layer.opacity.toFixed(2);
+    layer.meshes.forEach(m => { m.material.uniforms.uSegOpacity.value = layer.opacity; });
+  });
+
+  document.getElementById(colorId).addEventListener("input", function () {
+    layer.color = new THREE.Color(this.value);
+    layer.meshes.forEach(m => {
+      m.material.uniforms.uSegColor.value.set(layer.color.r, layer.color.g, layer.color.b);
+    });
+  });
+
+  document.getElementById(checkId).addEventListener("change", function () {
+    layer.enabled = this.checked;
+    // Rebuild so disabled layers aren't created; toggling visible is enough
+    // if already built — but a full redraw keeps Z-offsets consistent.
+    if (segReady) redraw();
+  });
+});
+
 } // end !shared
 
 // ── Initial state ────────────────────────────────────────────────────────────
