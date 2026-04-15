@@ -4,12 +4,13 @@ HTTP views for the biplane web viewer.
 """
 
 import json
+import re as _re
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 from django.views.decorators.http import require_POST, require_GET
 from django.views.decorators.csrf import ensure_csrf_cookie
 
-from .orthanc import orthanc_find_studies, orthanc_fetch_frame_bgr
+from .orthanc import orthanc_find_studies, orthanc_fetch_frame_bgr, orthanc_get_patient_dob
 from .cache   import get_frame, get_status, get_meta, set_status
 from .tasks   import load_study_task
 from .models  import SharedStudy
@@ -187,5 +188,44 @@ def api_instances(request, study_id):
                 "idx":       idx,
             })
         return JsonResponse({"instances": result})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+def _normalize_dob(raw: str) -> str:
+    """Normalize a user-typed date string to YYYYMMDD, or return '' if unrecognised."""
+    s = raw.strip().replace("-", "/").replace(".", "/").replace(" ", "")
+    if _re.match(r'^\d{8}$', s):
+        return s
+    m = _re.match(r'^(\d{4})/(\d{1,2})/(\d{1,2})$', s)
+    if m:
+        return f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}"
+    m = _re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', s)
+    if m:
+        return f"{m.group(3)}{int(m.group(1)):02d}{int(m.group(2)):02d}"
+    return ""
+
+
+@require_POST
+def api_verify_dob(request, study_id):
+    """
+    Verify a patient's date of birth against Orthanc.
+    POST body: {"dob": "<user-entered date>"}
+    Returns:   {"verified": true/false}  or  {"verified": true, "no_dob": true}
+               when Orthanc has no DOB on record.
+    The stored DOB is never returned to the client.
+    """
+    try:
+        body    = json.loads(request.body)
+        entered = body.get("dob", "").strip()
+        if not entered:
+            return JsonResponse({"error": "dob required"}, status=400)
+        normalized = _normalize_dob(entered)
+        if not normalized:
+            return JsonResponse({"verified": False, "reason": "invalid_format"})
+        stored = orthanc_get_patient_dob(study_id)
+        if not stored:
+            return JsonResponse({"verified": True, "no_dob": True})
+        return JsonResponse({"verified": normalized == stored.strip()})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)

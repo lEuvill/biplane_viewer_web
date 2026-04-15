@@ -13,6 +13,7 @@ urlpatterns = [
     path("api/status/<str:study_id>/",      views.api_study_status,    name="api_status"),
     path("api/preview/<str:study_id>/<str:plane>/", views.api_preview,  name="api_preview"),
     path("api/instances/<str:study_id>/",   views.api_instances,       name="api_instances"),
+    path("api/verify_dob/<str:study_id>/", views.api_verify_dob,      name="api_verify_dob"),
     path("api/frames/<str:study_id>/<int:frame_idx>/<str:plane>/",
          views.api_frame, name="api_frame"),
 ]
